@@ -27,6 +27,21 @@ connection:
   retry_count: 3
   # Time in seconds to wait between retry attempts.
   retry_interval: 1.0
+  # Maximum requests per second (rate limiting).
+  # Impact: Prevents overwhelming the Milvus server and enables graceful degradation under load.
+  # Set to 0 to disable rate limiting. Recommended: 1000 for production environments.
+  max_requests_per_second: 1000
+  # Rate limiter burst capacity (multiplier of max_requests_per_second).
+  # Impact: Allows temporary bursts above the sustained rate. Higher values = more bursty traffic allowed.
+  rate_limiter_burst_multiplier: 2.0
+  # Enable retry budget to prevent retry storms.
+  # Impact: Denies retries when success rate drops below threshold, preventing cascade failures.
+  enable_retry_budget: true
+  # Minimum success rate (0.0-1.0) required to allow retries.
+  # Impact: When success rate drops below this, retries are denied to protect the system.
+  retry_budget_min_success_rate: 0.8
+  # Time window in seconds for calculating retry budget success rate.
+  retry_budget_window_seconds: 10
 
 # --- Collection Settings ---
 # Default settings for creating and managing Milvus collections.

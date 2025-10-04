@@ -25,6 +25,8 @@ from connection_management.connection_exceptions import (
     ServerUnavailableError
 )
 from exceptions import OperationTimeoutError
+from utils.rate_limiter import TokenBucketRateLimiter
+from utils.retry_budget import RetryBudget
 
 # Logger setup
 logger = logging.getLogger(__name__)
@@ -96,6 +98,44 @@ class ConnectionManager:
         else:
             logger.info("ConnectionManager initialized without circuit breaker")
         
+        # PRODUCTION FIX: Initialize rate limiter for request throttling
+        # Rate limiting prevents overwhelming the Milvus server and enables graceful
+        # degradation under high load. This protects against request storms and ensures
+        # fair resource allocation across concurrent operations.
+        self._rate_limiter = None
+        max_rps = self.config.connection.max_requests_per_second
+        if max_rps > 0:
+            burst_multiplier = self.config.connection.rate_limiter_burst_multiplier
+            capacity = int(max_rps * burst_multiplier)
+            self._rate_limiter = TokenBucketRateLimiter(
+                rate=float(max_rps),
+                capacity=capacity
+            )
+            logger.info(
+                f"ConnectionManager initialized with rate limiter: "
+                f"{max_rps} req/s, burst capacity: {capacity}"
+            )
+        else:
+            logger.info("ConnectionManager initialized without rate limiting (max_requests_per_second=0)")
+        
+        # PRODUCTION FIX: Initialize retry budget to prevent retry storms
+        # Retry budget denies retries when the system's success rate drops below a threshold,
+        # preventing cascade failures during outages. This implements Netflix's retry budget pattern.
+        self._retry_budget = None
+        if self.config.connection.enable_retry_budget:
+            self._retry_budget = RetryBudget(
+                window_seconds=self.config.connection.retry_budget_window_seconds,
+                min_success_rate=self.config.connection.retry_budget_min_success_rate,
+                min_attempts=self.config.connection.retry_count * 2  # Need enough data
+            )
+            logger.info(
+                f"ConnectionManager initialized with retry budget: "
+                f"min_success_rate={self.config.connection.retry_budget_min_success_rate}, "
+                f"window={self.config.connection.retry_budget_window_seconds}s"
+            )
+        else:
+            logger.info("ConnectionManager initialized without retry budget")
+        
         logger.info("ConnectionManager initialized")
     
     def with_retry(self, func: Callable):
@@ -136,9 +176,29 @@ class ConnectionManager:
                 try:
                     if attempt > 0:
                         logger.info(f"Retry attempt {attempt}/{retry_count}")
-                    return func(*args, **kwargs)
+                    
+                    result = func(*args, **kwargs)
+                    
+                    # PRODUCTION FIX: Record success in retry budget
+                    if self._retry_budget:
+                        self._retry_budget.record_attempt(success=True)
+                    
+                    return result
+                    
                 except ConnectionError as e:
                     last_exception = e
+                    
+                    # PRODUCTION FIX: Record failure and check retry budget
+                    if self._retry_budget:
+                        retry_allowed = self._retry_budget.record_attempt(success=False)
+                        if not retry_allowed and attempt < retry_count:
+                            logger.error(
+                                f"Retry budget exhausted - denying retry to prevent retry storm. "
+                                f"Success rate too low."
+                            )
+                            # Don't retry if budget is exhausted
+                            break
+                    
                     if attempt < retry_count:
                         # Exponential backoff with jitter
                         backoff_time = retry_interval * (2 ** attempt)
@@ -282,13 +342,13 @@ class ConnectionManager:
     
     async def execute_operation_async(self, operation: Callable, timeout: Optional[float] = None, *args, **kwargs):
         """
-        Execute an operation asynchronously with circuit breaker protection.
+        Execute an operation asynchronously with circuit breaker protection and rate limiting.
 
         This method provides asynchronous execution of Milvus operations, allowing
         for non-blocking I/O operations in async applications. It combines the
         benefits of connection pooling, circuit breaker protection, retry logic, 
-        and async execution to provide high-performance, scalable Milvus operations 
-        for async frameworks.
+        rate limiting, and async execution to provide high-performance, scalable 
+        Milvus operations for async frameworks.
 
         The circuit breaker integration provides the same resilience benefits as
         the synchronous version while maintaining full async compatibility.
@@ -316,6 +376,14 @@ class ConnectionManager:
             ...     )
             >>> results = await manager.execute_operation_async(search_vectors, timeout=30.0, query_vector)
         """
+        # PRODUCTION FIX: Apply rate limiting before executing operation
+        # This prevents overwhelming the Milvus server during request storms
+        # and ensures fair resource allocation across concurrent operations
+        if self._rate_limiter:
+            wait_time = await self._rate_limiter.acquire()
+            if wait_time > 0:
+                logger.debug(f"Rate limiter delayed request by {wait_time:.3f}s")
+        
         if self._circuit_breaker:
             # Execute with circuit breaker protection (already async)
             return await self._execute_with_circuit_breaker(operation, timeout, *args, **kwargs)
@@ -414,6 +482,41 @@ class ConnectionManager:
             await self._circuit_breaker.reset()
         else:
             logger.warning("Cannot reset circuit breaker - circuit breaker is disabled")
+    
+    def get_rate_limiter_metrics(self) -> Optional[Dict[str, Any]]:
+        """
+        Get rate limiter metrics for monitoring and alerting.
+        
+        Returns:
+            Dict containing rate limiter metrics, or None if rate limiting is disabled
+        """
+        if self._rate_limiter:
+            return self._rate_limiter.get_metrics()
+        return None
+    
+    def get_retry_budget_metrics(self) -> Optional[Dict[str, Any]]:
+        """
+        Get retry budget metrics for monitoring retry storm protection.
+        
+        Returns:
+            Dict containing retry budget metrics, or None if retry budget is disabled
+        """
+        if self._retry_budget:
+            return self._retry_budget.get_metrics()
+        return None
+    
+    def get_all_metrics(self) -> Dict[str, Any]:
+        """
+        Get comprehensive metrics from all components for monitoring.
+        
+        Returns:
+            Dict containing metrics from circuit breaker, rate limiter, and retry budget
+        """
+        return {
+            "circuit_breaker": self.get_circuit_breaker_metrics(),
+            "rate_limiter": self.get_rate_limiter_metrics(),
+            "retry_budget": self.get_retry_budget_metrics(),
+        }
     
     def close(self):
         """

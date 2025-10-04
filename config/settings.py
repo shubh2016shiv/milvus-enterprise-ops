@@ -92,6 +92,16 @@ class ConnectionSettings(BaseSettings):
                             description="Number of times to retry failed operations")
     retry_interval: float = Field(1.0, env="MILVUS_RETRY_INTERVAL", 
                                  description="Time in seconds to wait between retry attempts")
+    max_requests_per_second: int = Field(1000, env="MILVUS_MAX_REQUESTS_PER_SECOND",
+                                        description="Maximum requests per second (rate limiting, 0=disabled)")
+    rate_limiter_burst_multiplier: float = Field(2.0, env="MILVUS_RATE_LIMITER_BURST_MULTIPLIER",
+                                                 description="Burst capacity multiplier for rate limiter")
+    enable_retry_budget: bool = Field(True, env="MILVUS_ENABLE_RETRY_BUDGET",
+                                     description="Enable retry budget to prevent retry storms")
+    retry_budget_min_success_rate: float = Field(0.8, env="MILVUS_RETRY_BUDGET_MIN_SUCCESS_RATE",
+                                                description="Minimum success rate (0.0-1.0) to allow retries")
+    retry_budget_window_seconds: int = Field(10, env="MILVUS_RETRY_BUDGET_WINDOW_SECONDS",
+                                            description="Time window for retry budget calculation")
 
     class Config:
         env_prefix = ""
