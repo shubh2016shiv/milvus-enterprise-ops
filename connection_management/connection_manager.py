@@ -24,6 +24,7 @@ from connection_management.connection_exceptions import (
     MaxRetriesExceededError,
     ServerUnavailableError
 )
+from exceptions import OperationTimeoutError
 
 # Logger setup
 logger = logging.getLogger(__name__)
@@ -210,15 +211,17 @@ class ConnectionManager:
         1. Checks server health before attempting operation
         2. Classifies errors to distinguish between connection and server issues
         3. Implements specific retry strategies for server unavailability
+        4. Enforces operation-level timeout to prevent hanging operations
         
         Args:
             operation: The operation to execute
-            timeout: Optional timeout for the operation
+            timeout: Optional timeout for the operation (enforced at operation level)
             *args, **kwargs: Additional arguments for the operation
             
         Raises:
             ServerUnavailableError: When server is confirmed to be down
             ConnectionError: For other connection-related issues
+            OperationTimeoutError: When operation exceeds timeout duration
         """
         # First check if server is responsive
         if not self.check_server_status():
@@ -245,7 +248,29 @@ class ConnectionManager:
                         raise ServerUnavailableError(f"Server became unavailable: {e}")
                     raise
             
-            return _execute_operation_with_pool()
+            # PRODUCTION FIX: Enforce operation-level timeout
+            # This ensures the actual Milvus operation execution respects the timeout,
+            # not just the connection acquisition phase. Without this, long-running
+            # operations can hang indefinitely despite timeout configuration.
+            loop = asyncio.get_event_loop()
+            
+            if timeout:
+                try:
+                    # Use asyncio.wait_for to enforce timeout on the executor task
+                    result = await asyncio.wait_for(
+                        loop.run_in_executor(self._executor, _execute_operation_with_pool),
+                        timeout=timeout
+                    )
+                    return result
+                except asyncio.TimeoutError:
+                    # Convert asyncio.TimeoutError to our OperationTimeoutError for consistency
+                    raise OperationTimeoutError(
+                        f"Operation exceeded timeout of {timeout}s. "
+                        "Consider increasing timeout or optimizing the operation."
+                    )
+            else:
+                # No timeout specified, execute without time limit
+                return await loop.run_in_executor(self._executor, _execute_operation_with_pool)
         
         try:
             return await self._circuit_breaker.execute_milvus_operation(_protected_operation)
@@ -303,8 +328,26 @@ class ConnectionManager:
             
             # Run the operation in the dedicated thread pool to avoid blocking the event loop
             # PRODUCTION SCALABILITY FIX: Use dedicated executor instead of shared default executor
+            # PRODUCTION FIX: Enforce operation-level timeout even without circuit breaker
             loop = asyncio.get_event_loop()
-            return await loop.run_in_executor(self._executor, _execute_operation_with_pool_async)
+            
+            if timeout:
+                try:
+                    # Use asyncio.wait_for to enforce timeout on the executor task
+                    result = await asyncio.wait_for(
+                        loop.run_in_executor(self._executor, _execute_operation_with_pool_async),
+                        timeout=timeout
+                    )
+                    return result
+                except asyncio.TimeoutError:
+                    # Convert asyncio.TimeoutError to our OperationTimeoutError for consistency
+                    raise OperationTimeoutError(
+                        f"Operation exceeded timeout of {timeout}s. "
+                        "Consider increasing timeout or optimizing the operation."
+                    )
+            else:
+                # No timeout specified, execute without time limit
+                return await loop.run_in_executor(self._executor, _execute_operation_with_pool_async)
     
     def check_server_status(self):
         """

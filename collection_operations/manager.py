@@ -79,6 +79,51 @@ class CollectionManager:
                 self._locks[collection_name] = asyncio.Lock()
             return self._locks[collection_name]
     
+    async def _cleanup_unused_locks(self) -> int:
+        """
+        Clean up locks for collections that no longer exist.
+        
+        PRODUCTION FIX: This method prevents memory leaks by removing locks for
+        collections that have been dropped. Without this cleanup, the _locks
+        dictionary would grow unbounded over time as collections are created
+        and dropped, leading to memory exhaustion in long-running production
+        deployments.
+        
+        This method should be called periodically (e.g., after drop operations
+        or on a background schedule) to maintain a healthy memory footprint.
+        
+        Returns:
+            The number of locks that were cleaned up.
+            
+        Note:
+            This method is safe to call at any time and will not interfere with
+            active operations, as it only removes locks for non-existent collections.
+        """
+        async with self._global_lock:
+            # Get the current list of collections from Milvus
+            # Use strict=False to avoid raising exceptions during cleanup
+            all_collections = await self.list_collections(strict=False)
+            
+            if all_collections is None:
+                all_collections = []
+            
+            collection_set = set(all_collections)
+            
+            # Find locks for collections that no longer exist
+            locks_to_remove = [name for name in self._locks if name not in collection_set]
+            
+            # Remove the orphaned locks
+            for name in locks_to_remove:
+                del self._locks[name]
+            
+            if locks_to_remove:
+                logger.debug(
+                    f"Cleaned up {len(locks_to_remove)} unused collection locks. "
+                    f"Remaining locks: {len(self._locks)}"
+                )
+            
+            return len(locks_to_remove)
+    
     async def create_collection(
         self, 
         collection_name: str, 
@@ -925,10 +970,21 @@ class CollectionManager:
                     timeout=timeout
                 )
                 
-                # Remove the collection lock
+                # Remove the collection lock immediately
                 async with self._global_lock:
                     if collection_name in self._locks:
                         del self._locks[collection_name]
+                
+                # PRODUCTION FIX: Trigger cleanup of other orphaned locks
+                # This prevents memory leaks by opportunistically removing locks for
+                # any other collections that may have been dropped externally or by
+                # other clients. This is safe because cleanup only removes locks for
+                # non-existent collections.
+                try:
+                    await self._cleanup_unused_locks()
+                except Exception as cleanup_error:
+                    # Don't fail the drop operation if cleanup fails
+                    logger.warning(f"Failed to cleanup unused locks: {cleanup_error}")
                 
                 # For future control-plane integration, we could update a metadata store
                 # to set the collection state to DELETED here
@@ -1104,3 +1160,27 @@ class CollectionManager:
                     disk_size=0,
                     index_size=0
                 )
+    
+    async def cleanup_locks(self) -> int:
+        """
+        Public method to manually trigger cleanup of unused collection locks.
+        
+        This method can be called periodically by the application to ensure
+        memory-efficient operation in long-running deployments. It's particularly
+        useful for applications that frequently create and drop collections.
+        
+        PRODUCTION USAGE:
+        - Call this method periodically (e.g., every hour) in production
+        - Call after batch operations that create/drop many collections
+        - Monitor the return value to track lock accumulation patterns
+        
+        Returns:
+            The number of locks that were cleaned up.
+            
+        Example:
+            >>> manager = CollectionManager(connection_manager)
+            >>> # After dropping multiple collections
+            >>> cleaned = await manager.cleanup_locks()
+            >>> logger.info(f"Cleaned up {cleaned} unused locks")
+        """
+        return await self._cleanup_unused_locks()

@@ -239,8 +239,37 @@ class MilvusConnectionPool:
                         self._in_use_connections.remove(conn_alias)
                         
                 if not self._closed:
-                    self._available_connections.put(conn_alias)
-                    logger.info(f"Connection {conn_alias} returned to pool. In-use connections: {len(self._in_use_connections)}, Available: {self._available_connections.qsize()}")
+                    # PRODUCTION FIX: Validate connection health before returning to pool
+                    # This prevents unhealthy connections from accumulating in the pool,
+                    # which would cause failures for the next operation that borrows them.
+                    # Without this check, a connection that became stale or broken during
+                    # an operation would be reused, leading to cascading failures.
+                    if self._is_connection_healthy(conn_alias):
+                        # Connection is healthy, return it to the pool
+                        self._available_connections.put(conn_alias)
+                        logger.info(f"Connection {conn_alias} returned to pool. In-use connections: {len(self._in_use_connections)}, Available: {self._available_connections.qsize()}")
+                    else:
+                        # Connection is unhealthy, attempt to recreate it
+                        logger.warning(f"Connection {conn_alias} is unhealthy after use, recreating...")
+                        try:
+                            # Disconnect the stale connection
+                            connections.disconnect(alias=conn_alias)
+                            
+                            # Create a new connection with the same alias
+                            self._create_connection(conn_alias)
+                            
+                            # Return the new healthy connection to the pool
+                            self._available_connections.put(conn_alias)
+                            logger.info(f"Connection {conn_alias} recreated and returned to pool. In-use connections: {len(self._in_use_connections)}, Available: {self._available_connections.qsize()}")
+                        except Exception as e:
+                            # Failed to recreate connection - this is serious
+                            logger.error(f"Failed to recreate connection {conn_alias}: {e}")
+                            # Don't return the connection to the pool - pool size is now reduced by 1
+                            # This should trigger monitoring alerts for degraded pool capacity
+                            logger.error(
+                                f"Connection pool capacity reduced to {self._available_connections.qsize()} "
+                                f"available connections (target: {self.config.connection.connection_pool_size})"
+                            )
                 else:
                     # If pool is closed, actually close this connection
                     try:
