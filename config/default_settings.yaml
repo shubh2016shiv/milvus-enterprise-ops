@@ -1,0 +1,150 @@
+# Default Milvus Operations Settings
+# This file provides the default configuration for the Milvus_Ops package.
+# You can override these settings by creating your own YAML file or by using environment variables.
+# For example, to override the host, you can set the environment variable MILVUS_HOST="your-milvus-host".
+
+# --- Connection Settings ---
+# These settings control how the client connects to the Milvus server, including pooling and retry logic.
+connection:
+  # The hostname or IP address of your Milvus server.
+  host: localhost
+  # The port on which Milvus server is listening. Default is 19530.
+  port: "19530"
+  # Username for authentication, if enabled on the server.
+  user: ""
+  # Password for authentication, if enabled on the server.
+  password: ""
+  # Set to true to enable TLS/SSL for a secure connection.
+  secure: false
+  # Connection and operation timeout in seconds.
+  # Impact: Prevents operations from hanging indefinitely. Increase for very large-scale operations.
+  timeout: 60
+  # Maximum number of connections to keep in the connection pool.
+  # Impact: Higher values can improve performance for applications with high concurrency, but consume more resources.
+  connection_pool_size: 10
+  # Number of times to retry a failed operation (e.g., due to transient network issues).
+  # Impact: Increases the resilience of the client against temporary failures.
+  retry_count: 3
+  # Time in seconds to wait between retry attempts.
+  retry_interval: 1.0
+
+# --- Collection Settings ---
+# Default settings for creating and managing Milvus collections.
+collection:
+  # If true, Milvus will automatically generate unique primary key IDs for inserted entities.
+  # If false, you must provide unique IDs for each entity.
+  auto_id: true
+  # Determines the trade-off between data consistency and query performance.
+  # Options:
+  # - Strong: Guarantees that all writes are visible to all subsequent reads. Safest, but can have higher latency.
+  # - Bounded: Allows for a brief period of data staleness, offering a good balance of performance and consistency.
+  # - Eventually: Offers the highest performance with the weakest consistency; reads may see stale data.
+  # - Session: Guarantees that a client will see its own writes.
+  consistency_level: Strong
+  # A version identifier for your collection schema. Useful for managing schema migrations.
+  schema_version: "1"
+
+# --- Index Settings ---
+# Configuration for building vector indexes. The choice of index and its parameters are critical for search performance.
+index:
+  # HNSW (Hierarchical Navigable Small World) index settings.
+  # Best for: A good balance between search speed and recall, suitable for most use cases.
+  hnsw_index_type: HNSW
+  hnsw_metric_type: COSINE # Use COSINE for semantic similarity with normalized vectors, L2 for raw distance.
+  hnsw_params:
+    # Number of bi-directional links for each node in the graph.
+    # Impact: Higher values improve recall and accuracy but increase memory usage and index build time.
+    # Tuning: A value between 8 and 64 is typical.
+    M: 16
+    # Size of the candidate list during index construction.
+    # Impact: Higher values result in a higher quality index (better recall) but significantly slow down index building.
+    # Tuning: A value between 100 and 500 is common.
+    efConstruction: 200
+
+  # IVF (Inverted File) index settings.
+  # Best for: Very large datasets where memory usage is a concern.
+  ivf_index_type: IVF_FLAT
+  ivf_metric_type: COSINE
+  ivf_params:
+    # Number of clusters (centroids) to partition the data into.
+    # Impact: Affects the balance between indexing time and search scope. A common rule of thumb is 4 * sqrt(number_of_vectors).
+    # Tuning: Typically between 1024 and 65536.
+    nlist: 1024
+
+  # FLAT index settings.
+  # Best for: Small datasets (< 1M vectors) or when 100% recall is required, as it performs a brute-force search.
+  flat_index_type: FLAT
+  flat_metric_type: COSINE
+
+  # Sparse vector index settings.
+  # Best for: Keyword-based search as part of a hybrid search strategy.
+  sparse_index_type: SPARSE_INVERTED_INDEX
+  sparse_metric_type: IP # Inner Product (IP) is recommended for sparse vectors.
+
+# --- Search Settings ---
+# Configuration for performing vector searches. These parameters can be tuned per-query to balance speed and accuracy.
+search:
+  # HNSW search settings.
+  hnsw_metric_type: COSINE
+  hnsw_params:
+    # Size of the candidate list during a search.
+    # Impact: This is the most critical tuning parameter for HNSW. Higher values lead to better recall and accuracy but increase search latency.
+    # Tuning: Adjust this per-query based on the desired accuracy-performance trade-off.
+    ef: 64
+
+  # IVF search settings.
+  ivf_metric_type: COSINE
+  ivf_params:
+    # Number of clusters to probe (search) during a query.
+    # Impact: This is the most critical tuning parameter for IVF. Higher values increase recall and accuracy by searching more of the dataset, but also increase latency.
+    # Tuning: Adjust per-query. A value between 8 and 128 is typical.
+    nprobe: 16
+
+  # FLAT search settings.
+  flat_metric_type: COSINE
+
+  # SPARSE search settings.
+  sparse_metric_type: IP
+
+  # Hybrid search settings.
+  # These weights determine the contribution of sparse (keyword) and dense (semantic) scores when combining results.
+  # Tuning: Adjust these based on whether your use case prioritizes keyword matches or semantic similarity.
+  hybrid_sparse_weight: 0.3
+  hybrid_dense_weight: 0.7
+
+# --- Insertion Settings ---
+# Settings that control the data insertion process.
+insertion:
+  # Number of entities to insert in a single batch.
+  # Impact: Larger batches can improve throughput but will consume more memory on both the client and server.
+  batch_size: 100
+  # Whether to perform client-side validation of data (e.g., vector dimensions) before sending to Milvus.
+  validate_data: true
+  # If true, Milvus will automatically flush inserted data, making it searchable.
+  # If false, you must manually call a flush operation.
+  auto_flush: true
+  # Timeout in seconds for insertion operations.
+  timeout: 60
+
+# --- Monitoring Settings ---
+# Configuration for logging and performance metrics.
+monitoring:
+  # Globally enable or disable metrics collection.
+  enable_metrics: true
+  # Set the logging level for the package. Options: DEBUG, INFO, WARNING, ERROR, CRITICAL.
+  log_level: INFO
+  # Enable or disable detailed performance tracking for operations like search and insertion.
+  performance_tracking: true
+  # Interval in seconds at which to collect and report metrics.
+  metrics_interval: 60
+
+# --- Backup Settings ---
+# Settings for data backup and recovery.
+backup:
+  # The local directory path where backup files will be stored.
+  backup_path: ./backups
+  # Whether to compress backup files to save storage space.
+  # Impact: Saves disk space but requires more CPU for backup and restore operations.
+  compression: true
+  # Number of days to retain backup files before they are automatically deleted.
+  retention_days: 30
