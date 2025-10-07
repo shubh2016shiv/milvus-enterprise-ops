@@ -17,12 +17,14 @@ class HybridSearchConfig(BaseSearchConfig):
     
     This configuration is used for hybrid search combining
     dense vector search with sparse vector or keyword search.
+    Supports vector-only mode when no sparse/keyword fields are specified.
     """
     vector_field: str = "vector"        # Dense vector field
     sparse_field: Optional[str] = None  # Sparse vector field
     keyword_field: Optional[str] = None # Keyword field
+    expr: Optional[str] = None          # Filter expression
     
-    # Weights for hybrid search
+    # Weights for hybrid search (flexible, will be normalized)
     vector_weight: float = 0.7
     sparse_weight: float = 0.3
     
@@ -30,15 +32,14 @@ class HybridSearchConfig(BaseSearchConfig):
         """Validate hybrid search configuration"""
         super().__post_init__()
         
-        # Ensure at least one additional field beyond vector is specified
-        if not self.sparse_field and not self.keyword_field:
-            raise ValueError("Hybrid search requires at least one of sparse_field or keyword_field")
+        # Note: sparse_field and keyword_field are now truly optional
+        # Vector-only mode is supported when neither is specified
         
-        # Validate weights sum to 1.0
-        total_weight = self.vector_weight
-        if self.sparse_field:
-            total_weight += self.sparse_weight
-            
-        if abs(total_weight - 1.0) > 0.001:  # Allow small floating point error
-            raise ValueError(f"Weights must sum to 1.0, got {total_weight}")
+        # Validate weights are non-negative
+        if self.vector_weight < 0 or self.sparse_weight < 0:
+            raise ValueError("Weights must be non-negative")
+        
+        # Ensure at least one weight is positive
+        if self.vector_weight <= 0 and self.sparse_weight <= 0:
+            raise ValueError("At least one weight must be positive")
 

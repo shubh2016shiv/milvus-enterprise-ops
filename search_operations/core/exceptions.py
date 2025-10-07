@@ -47,3 +47,18 @@ class EmptyResultError(SearchError):
     """Raised when search returns empty results unexpectedly"""
     pass
 
+
+class SparseVectorGenerationError(SearchError):
+    """Raised when sparse vector (BM25) generation fails"""
+    pass
+
+
+class ConnectionError(SearchError):
+    """Raised when connection to Milvus fails"""
+    pass
+
+
+class TimeoutError(SearchError):
+    """Raised when operation times out"""
+    pass
+
