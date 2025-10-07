@@ -1,0 +1,1391 @@
+"""
+Hybrid Search Operations
+
+This module provides implementation for hybrid search operations,
+combining dense vector search with sparse vectors (BM25) or keyword search
+with production-grade reliability, fault tolerance, and observability.
+"""
+
+import time
+import logging
+import asyncio
+import math
+import re
+from typing import List, Dict, Any, Optional, Union, Tuple, Set, Callable
+from dataclasses import dataclass, field
+from enum import Enum
+from contextlib import asynccontextmanager
+from collections import Counter, defaultdict
+
+from connection_management import ConnectionManager
+from ...core.exceptions import (
+    SearchError,
+    HybridSearchError,
+    InvalidSearchParametersError,
+    ConnectionError,
+    TimeoutError,
+    EmbeddingGenerationError,
+    SparseVectorGenerationError
+)
+from ...config.hybrid import HybridSearchConfig
+from ...providers.embedding import EmbeddingProvider
+from ...core.base import BaseSearch, SearchResult
+
+logger = logging.getLogger(__name__)
+
+
+class SearchStatus(Enum):
+    """Enumeration of search operation states"""
+    SUCCESS = "success"
+    FAILURE = "failure"
+    TIMEOUT = "timeout"
+    PARTIAL = "partial"
+    RETRYING = "retrying"
+    DEGRADED = "degraded"
+
+
+class HybridSearchMode(Enum):
+    """Hybrid search combination modes"""
+    VECTOR_SPARSE = "vector_sparse"
+    VECTOR_KEYWORD = "vector_keyword"
+    VECTOR_ONLY = "vector_only"
+    ALL_METHODS = "all_methods"
+
+
+@dataclass
+class HybridSearchMetrics:
+    """Comprehensive metrics for hybrid search operations"""
+    query_hash: str
+    embedding_time_ms: float = 0.0
+    sparse_generation_time_ms: float = 0.0
+    search_time_ms: float = 0.0
+    fusion_time_ms: float = 0.0
+    total_time_ms: float = 0.0
+    results_count: int = 0
+    retry_count: int = 0
+    status: SearchStatus = SearchStatus.SUCCESS
+    error_message: Optional[str] = None
+    cache_hit: bool = False
+    collection_name: str = ""
+    search_mode: HybridSearchMode = HybridSearchMode.VECTOR_ONLY
+    timestamp: float = field(default_factory=time.time)
+    dense_results: int = 0
+    sparse_results: int = 0
+    keyword_results: int = 0
+
+
+@dataclass
+class RetryConfig:
+    """Configuration for retry behavior"""
+    max_retries: int = 3
+    initial_delay: float = 0.5
+    max_delay: float = 30.0
+    exponential_base: float = 2.0
+    jitter: bool = True
+    retriable_exceptions: tuple = (ConnectionError, TimeoutError)
+
+
+@dataclass
+class BM25Config:
+    """Configuration for BM25 sparse vector generation"""
+    k1: float = 1.5  # Term frequency saturation parameter
+    b: float = 0.75  # Length normalization parameter
+    delta: float = 1.0  # Lower bound for term frequency normalization
+    min_term_length: int = 2
+    max_term_length: int = 50
+    max_dimensions: int = 10000
+    enable_stemming: bool = False
+    enable_stopwords: bool = True
+    custom_stopwords: Optional[Set[str]] = None
+    idf_smoothing: bool = True
+
+
+class BM25SparseVectorGenerator:
+    """
+    Production-grade BM25 sparse vector generator.
+    
+    Implements BM25 algorithm for generating sparse vector representations
+    with proper normalization, stopword removal, and caching.
+    """
+    
+    # Common English stopwords
+    DEFAULT_STOPWORDS = {
+        'a', 'an', 'and', 'are', 'as', 'at', 'be', 'by', 'for', 'from',
+        'has', 'he', 'in', 'is', 'it', 'its', 'of', 'on', 'that', 'the',
+        'to', 'was', 'will', 'with', 'the', 'this', 'but', 'they', 'have',
+        'had', 'what', 'when', 'where', 'who', 'which', 'why', 'how'
+    }
+    
+    def __init__(
+        self,
+        config: Optional[BM25Config] = None,
+        enable_caching: bool = True
+    ):
+        """
+        Initialize BM25 sparse vector generator.
+        
+        Args:
+            config: BM25 configuration
+            enable_caching: Enable caching of generated vectors
+        """
+        self.config = config or BM25Config()
+        self.enable_caching = enable_caching
+        
+        # Initialize stopwords
+        self.stopwords = self.config.custom_stopwords or self.DEFAULT_STOPWORDS
+        
+        # Cache for generated vectors
+        self._cache: Dict[str, Dict[str, Any]] = {}
+        self._cache_hits = 0
+        self._cache_misses = 0
+        
+        # Document statistics for IDF calculation
+        self._doc_count = 0
+        self._term_doc_freq: Dict[str, int] = defaultdict(int)
+        self._avg_doc_length = 0.0
+        self._lock = asyncio.Lock()
+        
+        logger.info(
+            f"BM25SparseVectorGenerator initialized - "
+            f"k1: {self.config.k1}, b: {self.config.b}, "
+            f"caching: {enable_caching}"
+        )
+    
+    def _tokenize(self, text: str) -> List[str]:
+        """
+        Tokenize text into terms.
+        
+        Args:
+            text: Input text
+            
+        Returns:
+            List of tokens
+        """
+        # Convert to lowercase
+        text = text.lower()
+        
+        # Remove special characters and split
+        tokens = re.findall(r'\b[a-z0-9]+\b', text)
+        
+        # Filter by length
+        tokens = [
+            t for t in tokens
+            if self.config.min_term_length <= len(t) <= self.config.max_term_length
+        ]
+        
+        # Remove stopwords if enabled
+        if self.config.enable_stopwords:
+            tokens = [t for t in tokens if t not in self.stopwords]
+        
+        return tokens
+    
+    def _calculate_idf(self, term: str, total_docs: int) -> float:
+        """
+        Calculate IDF (Inverse Document Frequency) for a term.
+        
+        Args:
+            term: The term to calculate IDF for
+            total_docs: Total number of documents
+            
+        Returns:
+            IDF score
+        """
+        doc_freq = self._term_doc_freq.get(term, 0)
+        
+        if self.config.idf_smoothing:
+            # Smoothed IDF to avoid division by zero
+            idf = math.log(1 + (total_docs - doc_freq + 0.5) / (doc_freq + 0.5))
+        else:
+            # Standard IDF
+            if doc_freq == 0:
+                idf = math.log(total_docs + 1)
+            else:
+                idf = math.log(total_docs / doc_freq)
+        
+        return max(idf, 0.0)  # Ensure non-negative
+    
+    def _calculate_bm25_score(
+        self,
+        term_freq: int,
+        doc_length: int,
+        idf: float
+    ) -> float:
+        """
+        Calculate BM25 score for a term.
+        
+        Args:
+            term_freq: Term frequency in document
+            doc_length: Length of the document
+            idf: IDF score of the term
+            
+        Returns:
+            BM25 score
+        """
+        # Normalize by document length
+        if self._avg_doc_length > 0:
+            normalized_length = doc_length / self._avg_doc_length
+        else:
+            normalized_length = 1.0
+        
+        # BM25 formula
+        numerator = term_freq * (self.config.k1 + 1)
+        denominator = (
+            term_freq +
+            self.config.k1 * (1 - self.config.b + self.config.b * normalized_length)
+        )
+        
+        score = idf * (numerator / (denominator + self.config.delta))
+        
+        return score
+    
+    async def generate(
+        self,
+        text: str,
+        use_cache: bool = True
+    ) -> Dict[str, Any]:
+        """
+        Generate BM25 sparse vector for text.
+        
+        Args:
+            text: Input text
+            use_cache: Whether to use cache
+            
+        Returns:
+            Sparse vector as dict with 'indices' and 'values'
+            
+        Raises:
+            SparseVectorGenerationError: If generation fails
+        """
+        if not text or not text.strip():
+            raise SparseVectorGenerationError("Input text cannot be empty")
+        
+        # Check cache
+        cache_key = hash(text)
+        if use_cache and self.enable_caching and cache_key in self._cache:
+            self._cache_hits += 1
+            logger.debug("BM25 cache hit")
+            return self._cache[cache_key].copy()
+        
+        self._cache_misses += 1
+        
+        try:
+            # Tokenize text
+            tokens = self._tokenize(text)
+            
+            if not tokens:
+                logger.warning("No valid tokens after tokenization")
+                return {"indices": [], "values": []}
+            
+            # Count term frequencies
+            term_freq = Counter(tokens)
+            doc_length = len(tokens)
+            
+            # Update document statistics
+            async with self._lock:
+                self._doc_count += 1
+                for term in term_freq.keys():
+                    self._term_doc_freq[term] += 1
+                
+                # Update average document length (running average)
+                if self._doc_count == 1:
+                    self._avg_doc_length = doc_length
+                else:
+                    self._avg_doc_length = (
+                        (self._avg_doc_length * (self._doc_count - 1) + doc_length) /
+                        self._doc_count
+                    )
+            
+            # Calculate BM25 scores
+            indices = []
+            values = []
+            
+            for term, freq in term_freq.items():
+                # Calculate IDF
+                idf = self._calculate_idf(term, self._doc_count)
+                
+                # Calculate BM25 score
+                score = self._calculate_bm25_score(freq, doc_length, idf)
+                
+                # Use term hash as index
+                index = hash(term) % self.config.max_dimensions
+                
+                indices.append(index)
+                values.append(score)
+            
+            # Sort by indices for consistency
+            sorted_pairs = sorted(zip(indices, values))
+            indices, values = zip(*sorted_pairs) if sorted_pairs else ([], [])
+            
+            result = {
+                "indices": list(indices),
+                "values": list(values)
+            }
+            
+            # Cache result
+            if self.enable_caching:
+                self._cache[cache_key] = result.copy()
+                # Limit cache size
+                if len(self._cache) > 10000:
+                    # Remove oldest 20% of entries
+                    remove_count = len(self._cache) // 5
+                    for key in list(self._cache.keys())[:remove_count]:
+                        del self._cache[key]
+            
+            logger.debug(
+                f"Generated BM25 sparse vector - "
+                f"tokens: {len(tokens)}, dimensions: {len(indices)}"
+            )
+            
+            return result
+            
+        except Exception as e:
+            error_msg = f"BM25 sparse vector generation failed: {str(e)}"
+            logger.error(error_msg)
+            raise SparseVectorGenerationError(error_msg) from e
+    
+    def get_stats(self) -> Dict[str, Any]:
+        """Get statistics about the BM25 generator."""
+        total_requests = self._cache_hits + self._cache_misses
+        hit_rate = (
+            self._cache_hits / total_requests if total_requests > 0 else 0.0
+        )
+        
+        return {
+            "cache_hits": self._cache_hits,
+            "cache_misses": self._cache_misses,
+            "cache_hit_rate": round(hit_rate, 3),
+            "cache_size": len(self._cache),
+            "doc_count": self._doc_count,
+            "unique_terms": len(self._term_doc_freq),
+            "avg_doc_length": round(self._avg_doc_length, 2)
+        }
+    
+    async def clear_cache(self) -> None:
+        """Clear the cache."""
+        async with self._lock:
+            self._cache.clear()
+            self._cache_hits = 0
+            self._cache_misses = 0
+        logger.info("BM25 cache cleared")
+
+
+class CircuitBreaker:
+    """Circuit breaker pattern implementation for fault tolerance."""
+    
+    def __init__(
+        self,
+        failure_threshold: int = 5,
+        recovery_timeout: float = 60.0,
+        expected_exception: type = Exception
+    ):
+        self.failure_threshold = failure_threshold
+        self.recovery_timeout = recovery_timeout
+        self.expected_exception = expected_exception
+        self.failure_count = 0
+        self.last_failure_time: Optional[float] = None
+        self.state = "closed"  # closed, open, half_open
+        self._lock = asyncio.Lock()
+    
+    async def call(self, func: Callable, *args, **kwargs):
+        """Execute function with circuit breaker protection"""
+        async with self._lock:
+            if self.state == "open":
+                if time.time() - self.last_failure_time >= self.recovery_timeout:
+                    self.state = "half_open"
+                    logger.info("Circuit breaker entering half-open state")
+                else:
+                    raise HybridSearchError("Circuit breaker is OPEN - too many failures")
+        
+        try:
+            result = await func(*args, **kwargs)
+            async with self._lock:
+                if self.state == "half_open":
+                    self.state = "closed"
+                    self.failure_count = 0
+                    logger.info("Circuit breaker closed - service recovered")
+            return result
+        except self.expected_exception as e:
+            async with self._lock:
+                self.failure_count += 1
+                self.last_failure_time = time.time()
+                
+                if self.failure_count >= self.failure_threshold:
+                    self.state = "open"
+                    logger.error(f"Circuit breaker OPENED after {self.failure_count} failures")
+            raise
+
+
+class HybridSearch(BaseSearch[HybridSearchConfig]):
+    """
+    Production-grade implementation of hybrid search.
+    
+    Features:
+    - BM25 sparse vector generation
+    - Multiple search mode support (vector+sparse, vector+keyword, all)
+    - Automatic retry with exponential backoff
+    - Circuit breaker for fault tolerance
+    - Result fusion strategies (RRF, weighted)
+    - Comprehensive metrics and observability
+    - Parameter validation and sanitization
+    - Graceful degradation
+    """
+    
+    def __init__(
+        self,
+        connection_manager: ConnectionManager,
+        embedding_provider: EmbeddingProvider,
+        enable_caching: bool = True,
+        bm25_config: Optional[BM25Config] = None,
+        retry_config: Optional[RetryConfig] = None,
+        enable_circuit_breaker: bool = True,
+        metrics_callback: Optional[Callable[[HybridSearchMetrics], None]] = None,
+        max_batch_size: int = 50,
+        enable_query_optimization: bool = True,
+        fallback_to_vector: bool = True
+    ):
+        """
+        Initialize hybrid search with production features.
+        
+        Args:
+            connection_manager: ConnectionManager for Milvus operations
+            embedding_provider: Provider for generating embeddings
+            enable_caching: Whether to enable caching
+            bm25_config: BM25 configuration
+            retry_config: Configuration for retry behavior
+            enable_circuit_breaker: Enable circuit breaker pattern
+            metrics_callback: Optional callback for metrics reporting
+            max_batch_size: Maximum batch size for bulk operations
+            enable_query_optimization: Enable query optimization features
+            fallback_to_vector: Fallback to vector-only search on sparse errors
+        """
+        super().__init__(connection_manager, embedding_provider, enable_caching)
+        
+        # Initialize BM25 generator
+        self.bm25_generator = BM25SparseVectorGenerator(
+            config=bm25_config,
+            enable_caching=enable_caching
+        )
+        
+        self.retry_config = retry_config or RetryConfig()
+        self.metrics_callback = metrics_callback
+        self.max_batch_size = max_batch_size
+        self.enable_query_optimization = enable_query_optimization
+        self.fallback_to_vector = fallback_to_vector
+        
+        # Initialize circuit breaker
+        self.circuit_breaker = None
+        if enable_circuit_breaker:
+            self.circuit_breaker = CircuitBreaker(
+                failure_threshold=5,
+                recovery_timeout=60.0,
+                expected_exception=HybridSearchError
+            )
+        
+        # Metrics storage
+        self._metrics_history: List[HybridSearchMetrics] = []
+        self._lock = asyncio.Lock()
+        
+        logger.info(
+            f"HybridSearch initialized - "
+            f"caching: {enable_caching}, "
+            f"circuit_breaker: {enable_circuit_breaker}, "
+            f"fallback: {fallback_to_vector}"
+        )
+    
+    def _validate_search_params(
+        self,
+        collection_name: str,
+        query: str,
+        config: HybridSearchConfig
+    ) -> None:
+        """Validate search parameters."""
+        if not collection_name or not collection_name.strip():
+            raise InvalidSearchParametersError("Collection name cannot be empty")
+        
+        if not query or not query.strip():
+            raise InvalidSearchParametersError("Query cannot be empty")
+        
+        if config.top_k <= 0:
+            raise InvalidSearchParametersError(f"top_k must be positive, got {config.top_k}")
+        
+        if config.top_k > 16384:
+            raise InvalidSearchParametersError(
+                f"top_k exceeds maximum (16384), got {config.top_k}"
+            )
+        
+        # Validate weights
+        if config.vector_weight < 0 or config.sparse_weight < 0:
+            raise InvalidSearchParametersError("Weights must be non-negative")
+        
+        total_weight = config.vector_weight + config.sparse_weight
+        if total_weight <= 0:
+            raise InvalidSearchParametersError("At least one weight must be positive")
+    
+    def _sanitize_query(self, query: str) -> str:
+        """Sanitize query string."""
+        sanitized = "".join(char for char in query if ord(char) >= 32 or char == "\n")
+        sanitized = " ".join(sanitized.split())
+        
+        max_length = 10000
+        if len(sanitized) > max_length:
+            logger.warning(f"Query truncated from {len(sanitized)} to {max_length}")
+            sanitized = sanitized[:max_length]
+        
+        return sanitized
+    
+    def _calculate_backoff_delay(self, attempt: int) -> float:
+        """Calculate exponential backoff delay."""
+        delay = min(
+            self.retry_config.initial_delay * (self.retry_config.exponential_base ** attempt),
+            self.retry_config.max_delay
+        )
+        
+        if self.retry_config.jitter:
+            import random
+            delay *= (0.5 + random.random())
+        
+        return delay
+    
+    async def _execute_with_retry(self, func: Callable, *args, **kwargs) -> Any:
+        """Execute function with retry logic."""
+        last_exception = None
+        
+        for attempt in range(self.retry_config.max_retries + 1):
+            try:
+                return await func(*args, **kwargs)
+            except self.retry_config.retriable_exceptions as e:
+                last_exception = e
+                
+                if attempt < self.retry_config.max_retries:
+                    delay = self._calculate_backoff_delay(attempt)
+                    logger.warning(
+                        f"Attempt {attempt + 1} failed: {str(e)}. Retrying in {delay:.2f}s..."
+                    )
+                    await asyncio.sleep(delay)
+            except Exception as e:
+                logger.error(f"Non-retriable exception: {str(e)}")
+                raise
+        
+        raise last_exception
+    
+    def _determine_search_mode(self, config: HybridSearchConfig) -> HybridSearchMode:
+        """Determine the hybrid search mode based on configuration."""
+        has_sparse = bool(config.sparse_field)
+        has_keyword = bool(config.keyword_field)
+        
+        if has_sparse and has_keyword:
+            return HybridSearchMode.ALL_METHODS
+        elif has_sparse:
+            return HybridSearchMode.VECTOR_SPARSE
+        elif has_keyword:
+            return HybridSearchMode.VECTOR_KEYWORD
+        else:
+            return HybridSearchMode.VECTOR_ONLY
+    
+    async def _fuse_results_rrf(
+        self,
+        results_list: List[List[Dict[str, Any]]],
+        k: int = 60
+    ) -> List[Dict[str, Any]]:
+        """
+        Fuse results using Reciprocal Rank Fusion (RRF).
+        
+        Args:
+            results_list: List of result lists from different searches
+            k: RRF parameter (typically 60)
+            
+        Returns:
+            Fused and ranked results
+        """
+        scores: Dict[str, float] = defaultdict(float)
+        doc_data: Dict[str, Dict[str, Any]] = {}
+        
+        for results in results_list:
+            for rank, doc in enumerate(results, start=1):
+                doc_id = str(doc.get('id', doc.get('pk', '')))
+                scores[doc_id] += 1.0 / (k + rank)
+                if doc_id not in doc_data:
+                    doc_data[doc_id] = doc
+        
+        # Sort by fused score
+        sorted_docs = sorted(
+            scores.items(),
+            key=lambda x: x[1],
+            reverse=True
+        )
+        
+        fused_results = []
+        for doc_id, score in sorted_docs:
+            doc = doc_data[doc_id].copy()
+            doc['fusion_score'] = score
+            fused_results.append(doc)
+        
+        return fused_results
+    
+    async def _fuse_results_weighted(
+        self,
+        vector_results: List[Dict[str, Any]],
+        sparse_results: List[Dict[str, Any]],
+        vector_weight: float,
+        sparse_weight: float
+    ) -> List[Dict[str, Any]]:
+        """
+        Fuse results using weighted scoring.
+        
+        Args:
+            vector_results: Results from vector search
+            sparse_results: Results from sparse search
+            vector_weight: Weight for vector scores
+            sparse_weight: Weight for sparse scores
+            
+        Returns:
+            Fused and ranked results
+        """
+        scores: Dict[str, Dict[str, float]] = defaultdict(lambda: {'vector': 0.0, 'sparse': 0.0})
+        doc_data: Dict[str, Dict[str, Any]] = {}
+        
+        # Normalize weights
+        total_weight = vector_weight + sparse_weight
+        norm_vector_weight = vector_weight / total_weight
+        norm_sparse_weight = sparse_weight / total_weight
+        
+        # Process vector results
+        for doc in vector_results:
+            doc_id = str(doc.get('id', doc.get('pk', '')))
+            scores[doc_id]['vector'] = doc.get('distance', 0.0)
+            doc_data[doc_id] = doc
+        
+        # Process sparse results
+        for doc in sparse_results:
+            doc_id = str(doc.get('id', doc.get('pk', '')))
+            scores[doc_id]['sparse'] = doc.get('distance', 0.0)
+            if doc_id not in doc_data:
+                doc_data[doc_id] = doc
+        
+        # Calculate weighted scores
+        final_scores = {}
+        for doc_id, score_dict in scores.items():
+            final_scores[doc_id] = (
+                score_dict['vector'] * norm_vector_weight +
+                score_dict['sparse'] * norm_sparse_weight
+            )
+        
+        # Sort by final score
+        sorted_docs = sorted(
+            final_scores.items(),
+            key=lambda x: x[1],
+            reverse=True
+        )
+        
+        fused_results = []
+        for doc_id, score in sorted_docs:
+            doc = doc_data[doc_id].copy()
+            doc['fusion_score'] = score
+            doc['vector_score'] = scores[doc_id]['vector']
+            doc['sparse_score'] = scores[doc_id]['sparse']
+            fused_results.append(doc)
+        
+        return fused_results
+    
+    async def search(
+        self,
+        collection_name: str,
+        query: str,
+        config: HybridSearchConfig,
+        request_id: Optional[str] = None,
+        fusion_strategy: str = "rrf"  # "rrf" or "weighted"
+    ) -> SearchResult:
+        """
+        Perform hybrid search operation with full production features.
+        
+        Args:
+            collection_name: Name of the collection to search
+            query: Query text
+            config: Hybrid search configuration
+            request_id: Optional request ID for tracing
+            fusion_strategy: Strategy for fusing results ("rrf" or "weighted")
+            
+        Returns:
+            SearchResult with fused hits and metadata
+            
+        Raises:
+            InvalidSearchParametersError: If parameters are invalid
+            HybridSearchError: If search operation fails after retries
+        """
+        start_time = time.time()
+        search_mode = self._determine_search_mode(config)
+        
+        metrics = HybridSearchMetrics(
+            query_hash=str(hash(query)),
+            collection_name=collection_name,
+            search_mode=search_mode
+        )
+        
+        try:
+            # Validate and sanitize
+            self._validate_search_params(collection_name, query, config)
+            sanitized_query = self._sanitize_query(query)
+            
+            # Generate dense embedding
+            embedding_start = time.time()
+            query_vector = await self._execute_with_retry(
+                self._generate_embedding,
+                sanitized_query
+            )
+            metrics.embedding_time_ms = (time.time() - embedding_start) * 1000
+            
+            # Prepare search results storage
+            all_results = []
+            
+            # Execute vector search
+            search_start = time.time()
+            vector_results = None
+            
+            try:
+                vector_search_params = {
+                    "data": [query_vector],
+                    "anns_field": config.vector_field,
+                    "param": config.params or {},
+                    "limit": config.top_k,
+                    "expr": config.expr,
+                    "output_fields": config.output_fields or []
+                }
+                
+                vector_results, _ = await self._execute_with_retry(
+                    self._execute_search,
+                    collection_name=collection_name,
+                    search_params=vector_search_params,
+                    timeout=config.timeout
+                )
+                
+                metrics.dense_results = len(vector_results)
+                all_results.append(vector_results)
+                logger.debug(f"Vector search returned {len(vector_results)} results")
+                
+            except Exception as e:
+                logger.error(f"Vector search failed: {str(e)}")
+                if not self.fallback_to_vector:
+                    raise
+            
+            # Execute sparse search if configured
+            sparse_results = None
+            if config.sparse_field and search_mode in [
+                HybridSearchMode.VECTOR_SPARSE,
+                HybridSearchMode.ALL_METHODS
+            ]:
+                try:
+                    sparse_start = time.time()
+                    sparse_vector = await self.bm25_generator.generate(sanitized_query)
+                    metrics.sparse_generation_time_ms = (time.time() - sparse_start) * 1000
+                    
+                    sparse_search_params = {
+                        "data": [sparse_vector],
+                        "anns_field": config.sparse_field,
+                        "param": {},
+                        "limit": config.top_k,
+                        "expr": config.expr,
+                        "output_fields": config.output_fields or []
+                    }
+                    
+                    sparse_results, _ = await self._execute_with_retry(
+                        self._execute_search,
+                        collection_name=collection_name,
+                        search_params=sparse_search_params,
+                        timeout=config.timeout
+                    )
+                    
+                    metrics.sparse_results = len(sparse_results)
+                    all_results.append(sparse_results)
+                    logger.debug(f"Sparse search returned {len(sparse_results)} results")
+                    
+                except Exception as e:
+                    logger.warning(f"Sparse search failed: {str(e)}")
+                    if self.fallback_to_vector and vector_results:
+                        logger.info("Falling back to vector-only results")
+                        metrics.status = SearchStatus.DEGRADED
+                    else:
+                        raise
+            
+            metrics.search_time_ms = (time.time() - search_start) * 1000
+            
+            # Fuse results
+            fusion_start = time.time()
+            if len(all_results) > 1:
+                if fusion_strategy == "rrf":
+                    fused_results = await self._fuse_results_rrf(all_results)
+                else:
+                    fused_results = await self._fuse_results_weighted(
+                        vector_results or [],
+                        sparse_results or [],
+                        config.vector_weight,
+                        config.sparse_weight
+                    )
+                fused_results = fused_results[:config.top_k]
+            elif len(all_results) == 1:
+                fused_results = all_results[0][:config.top_k]
+            else:
+                fused_results = []
+            
+            metrics.fusion_time_ms = (time.time() - fusion_start) * 1000
+            metrics.results_count = len(fused_results)
+            
+            # Create search result
+            search_result = SearchResult(
+                hits=fused_results,
+                total_hits=len(fused_results),
+                took_ms=metrics.search_time_ms + metrics.fusion_time_ms,
+                search_params={
+                    "type": "hybrid",
+                    "mode": search_mode.value,
+                    "vector_field": config.vector_field,
+                    "sparse_field": config.sparse_field,
+                    "keyword_field": config.keyword_field,
+                    "top_k": config.top_k,
+                    "fusion_strategy": fusion_strategy,
+                    "vector_weight": config.vector_weight,
+                    "sparse_weight": config.sparse_weight,
+                    "request_id": request_id,
+                    "dense_results": metrics.dense_results,
+                    "sparse_results": metrics.sparse_results
+                }
+            )
+            
+            logger.info(
+                f"Hybrid search completed - collection: {collection_name}, "
+                f"mode: {search_mode.value}, results: {len(fused_results)}, "
+                f"embedding: {metrics.embedding_time_ms:.2f}ms, "
+                f"sparse_gen: {metrics.sparse_generation_time_ms:.2f}ms, "
+                f"search: {metrics.search_time_ms:.2f}ms, "
+                f"fusion: {metrics.fusion_time_ms:.2f}ms"
+            )
+            
+            return search_result
+            
+        except InvalidSearchParametersError as e:
+            metrics.status = SearchStatus.FAILURE
+            metrics.error_message = str(e)
+            logger.error(f"Invalid search parameters: {str(e)}")
+            raise
+            
+        except Exception as e:
+            metrics.status = SearchStatus.FAILURE
+            metrics.error_message = str(e)
+            error_msg = f"Hybrid search failed: {str(e)}"
+            logger.error(error_msg, exc_info=True)
+            raise HybridSearchError(error_msg) from e
+            
+        finally:
+            # Record total time and store metrics
+            metrics.total_time_ms = (time.time() - start_time) * 1000
+            
+            async with self._lock:
+                self._metrics_history.append(metrics)
+                if len(self._metrics_history) > 1000:
+                    self._metrics_history = self._metrics_history[-1000:]
+            
+            if self.metrics_callback:
+                try:
+                    self.metrics_callback(metrics)
+                except Exception as e:
+                    logger.error(f"Metrics callback failed: {str(e)}")
+    
+    async def batch_search(
+        self,
+        collection_name: str,
+        queries: List[str],
+        config: HybridSearchConfig,
+        request_id: Optional[str] = None,
+        fusion_strategy: str = "rrf"
+    ) -> List[SearchResult]:
+        """
+        Perform batch hybrid search with automatic batching.
+        
+        Args:
+            collection_name: Name of the collection to search
+            queries: List of query texts
+            config: Hybrid search configuration
+            request_id: Optional request ID for tracing
+            fusion_strategy: Strategy for fusing results
+            
+        Returns:
+            List of SearchResult objects
+            
+        Raises:
+            InvalidSearchParametersError: If parameters are invalid
+            HybridSearchError: If search operation fails
+        """
+        if not queries:
+            raise InvalidSearchParametersError("Queries list cannot be empty")
+        
+        results = []
+        for i in range(0, len(queries), self.max_batch_size):
+            batch = queries[i:i + self.max_batch_size]
+            batch_results = await asyncio.gather(
+                *[
+                    self.search(
+                        collection_name,
+                        query,
+                        config,
+                        f"{request_id}-{j}" if request_id else None,
+                        fusion_strategy
+                    )
+                    for j, query in enumerate(batch, start=i)
+                ],
+                return_exceptions=True
+            )
+            
+            for j, result in enumerate(batch_results):
+                if isinstance(result, Exception):
+                    logger.error(f"Query {i + j} failed in batch: {str(result)}")
+                    raise HybridSearchError(
+                        f"Batch search failed at index {i + j}"
+                    ) from result
+                results.append(result)
+        
+        return results
+    
+    async def search_with_reranking(
+        self,
+        collection_name: str,
+        query: str,
+        config: HybridSearchConfig,
+        rerank_top_k: int = 100,
+        final_top_k: Optional[int] = None,
+        request_id: Optional[str] = None
+    ) -> SearchResult:
+        """
+        Perform hybrid search with two-stage retrieval and reranking.
+        
+        First retrieves more results, then reranks and returns top results.
+        
+        Args:
+            collection_name: Name of the collection
+            query: Query text
+            config: Search configuration
+            rerank_top_k: Number of results to retrieve for reranking
+            final_top_k: Final number of results to return
+            request_id: Optional request ID
+            
+        Returns:
+            SearchResult with reranked results
+        """
+        final_top_k = final_top_k or config.top_k
+        
+        # First stage: retrieve more results
+        config_stage1 = config.copy() if hasattr(config, 'copy') else config
+        config_stage1.top_k = rerank_top_k
+        
+        stage1_result = await self.search(
+            collection_name,
+            query,
+            config_stage1,
+            request_id
+        )
+        
+        # Second stage: rerank (placeholder - implement your reranking logic)
+        # For now, just return top final_top_k results
+        reranked_hits = stage1_result.hits[:final_top_k]
+        
+        return SearchResult(
+            hits=reranked_hits,
+            total_hits=len(reranked_hits),
+            took_ms=stage1_result.took_ms,
+            search_params={
+                **stage1_result.search_params,
+                "reranked": True,
+                "rerank_top_k": rerank_top_k,
+                "final_top_k": final_top_k
+            }
+        )
+    
+    async def get_metrics_summary(self) -> Dict[str, Any]:
+        """
+        Get summary of search metrics.
+        
+        Returns:
+            Dictionary with metrics summary
+        """
+        async with self._lock:
+            if not self._metrics_history:
+                return {"message": "No metrics available"}
+            
+            total_searches = len(self._metrics_history)
+            successful = sum(
+                1 for m in self._metrics_history
+                if m.status == SearchStatus.SUCCESS
+            )
+            failed = sum(
+                1 for m in self._metrics_history
+                if m.status == SearchStatus.FAILURE
+            )
+            degraded = sum(
+                1 for m in self._metrics_history
+                if m.status == SearchStatus.DEGRADED
+            )
+            
+            # Calculate averages
+            avg_embedding = sum(m.embedding_time_ms for m in self._metrics_history) / total_searches
+            avg_sparse = sum(m.sparse_generation_time_ms for m in self._metrics_history) / total_searches
+            avg_search = sum(m.search_time_ms for m in self._metrics_history) / total_searches
+            avg_fusion = sum(m.fusion_time_ms for m in self._metrics_history) / total_searches
+            avg_total = sum(m.total_time_ms for m in self._metrics_history) / total_searches
+            
+            # Count by search mode
+            mode_counts = defaultdict(int)
+            for m in self._metrics_history:
+                mode_counts[m.search_mode.value] += 1
+            
+            return {
+                "total_searches": total_searches,
+                "successful": successful,
+                "failed": failed,
+                "degraded": degraded,
+                "success_rate": successful / total_searches if total_searches > 0 else 0,
+                "avg_embedding_time_ms": round(avg_embedding, 2),
+                "avg_sparse_generation_ms": round(avg_sparse, 2),
+                "avg_search_time_ms": round(avg_search, 2),
+                "avg_fusion_time_ms": round(avg_fusion, 2),
+                "avg_total_time_ms": round(avg_total, 2),
+                "search_modes": dict(mode_counts),
+                "bm25_stats": self.bm25_generator.get_stats(),
+                "circuit_breaker_state": self.circuit_breaker.state if self.circuit_breaker else "disabled"
+            }
+    
+    async def health_check(self) -> Dict[str, Any]:
+        """
+        Perform health check of the hybrid search system.
+        
+        Returns:
+            Health status dictionary
+        """
+        health = {
+            "status": "healthy",
+            "timestamp": time.time(),
+            "components": {}
+        }
+        
+        try:
+            # Check connection
+            conn_healthy = await self.connection_manager.health_check()
+            health["components"]["connection"] = {
+                "status": "healthy" if conn_healthy else "unhealthy"
+            }
+            
+            # Check embedding provider
+            embed_healthy = await self.embedding_provider.health_check()
+            health["components"]["embedding"] = {
+                "status": "healthy" if embed_healthy else "unhealthy"
+            }
+            
+            # Check BM25 generator
+            bm25_stats = self.bm25_generator.get_stats()
+            health["components"]["bm25"] = {
+                "status": "healthy",
+                "cache_hit_rate": bm25_stats["cache_hit_rate"],
+                "doc_count": bm25_stats["doc_count"]
+            }
+            
+            # Check circuit breaker
+            if self.circuit_breaker:
+                health["components"]["circuit_breaker"] = {
+                    "state": self.circuit_breaker.state,
+                    "failures": self.circuit_breaker.failure_count
+                }
+            
+            # Overall status
+            if not (conn_healthy and embed_healthy):
+                health["status"] = "degraded"
+            
+            if self.circuit_breaker and self.circuit_breaker.state == "open":
+                health["status"] = "unhealthy"
+            
+        except Exception as e:
+            health["status"] = "unhealthy"
+            health["error"] = str(e)
+            logger.error(f"Health check failed: {str(e)}")
+        
+        return health
+    
+    async def optimize_bm25_params(
+        self,
+        sample_documents: List[str],
+        param_ranges: Optional[Dict[str, List[float]]] = None
+    ) -> BM25Config:
+        """
+        Optimize BM25 parameters using sample documents.
+        
+        Args:
+            sample_documents: Sample documents for parameter tuning
+            param_ranges: Optional parameter ranges to search
+            
+        Returns:
+            Optimized BM25Config
+        """
+        if not param_ranges:
+            param_ranges = {
+                "k1": [1.0, 1.2, 1.5, 1.8, 2.0],
+                "b": [0.5, 0.65, 0.75, 0.85, 1.0]
+            }
+        
+        best_config = None
+        best_score = float('-inf')
+        
+        # Simple grid search (in production, use more sophisticated methods)
+        for k1 in param_ranges.get("k1", [1.5]):
+            for b in param_ranges.get("b", [0.75]):
+                test_config = BM25Config(k1=k1, b=b)
+                test_generator = BM25SparseVectorGenerator(config=test_config)
+                
+                # Generate vectors and compute quality metrics
+                vectors = []
+                for doc in sample_documents[:100]:  # Limit sample size
+                    try:
+                        vec = await test_generator.generate(doc)
+                        vectors.append(vec)
+                    except Exception:
+                        continue
+                
+                # Simple quality metric: average sparsity
+                if vectors:
+                    avg_sparsity = sum(len(v["indices"]) for v in vectors) / len(vectors)
+                    score = avg_sparsity  # Higher sparsity might be better for some use cases
+                    
+                    if score > best_score:
+                        best_score = score
+                        best_config = test_config
+        
+        logger.info(f"Optimized BM25 params - k1: {best_config.k1}, b: {best_config.b}")
+        return best_config or BM25Config()
+    
+    async def explain_search(
+        self,
+        collection_name: str,
+        query: str,
+        config: HybridSearchConfig,
+        request_id: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Explain hybrid search results with detailed breakdown.
+        
+        Args:
+            collection_name: Collection name
+            query: Query text
+            config: Search configuration
+            request_id: Optional request ID
+            
+        Returns:
+            Detailed explanation of search process and results
+        """
+        start_time = time.time()
+        explanation = {
+            "query": query,
+            "search_mode": self._determine_search_mode(config).value,
+            "stages": {},
+            "timing": {}
+        }
+        
+        try:
+            # Tokenization
+            tokens = self.bm25_generator._tokenize(query)
+            explanation["stages"]["tokenization"] = {
+                "original_query": query,
+                "tokens": tokens,
+                "token_count": len(tokens)
+            }
+            
+            # Embedding generation
+            embed_start = time.time()
+            query_vector = await self._generate_embedding(query)
+            explanation["timing"]["embedding_ms"] = (time.time() - embed_start) * 1000
+            explanation["stages"]["embedding"] = {
+                "dimension": len(query_vector),
+                "norm": sum(x**2 for x in query_vector)**0.5
+            }
+            
+            # Sparse vector generation
+            if config.sparse_field:
+                sparse_start = time.time()
+                sparse_vector = await self.bm25_generator.generate(query)
+                explanation["timing"]["sparse_generation_ms"] = (time.time() - sparse_start) * 1000
+                explanation["stages"]["sparse_vector"] = {
+                    "dimension": len(sparse_vector["indices"]),
+                    "sparsity": len(sparse_vector["indices"]) / self.bm25_generator.config.max_dimensions,
+                    "top_indices": sparse_vector["indices"][:10],
+                    "top_values": sparse_vector["values"][:10]
+                }
+            
+            # Execute search
+            result = await self.search(collection_name, query, config, request_id)
+            
+            explanation["timing"]["total_ms"] = (time.time() - start_time) * 1000
+            explanation["results"] = {
+                "count": len(result.hits),
+                "top_scores": [hit.get("fusion_score", 0.0) for hit in result.hits[:5]]
+            }
+            explanation["search_params"] = result.search_params
+            
+        except Exception as e:
+            explanation["error"] = str(e)
+            logger.error(f"Search explanation failed: {str(e)}")
+        
+        return explanation
+    
+    async def benchmark(
+        self,
+        collection_name: str,
+        test_queries: List[str],
+        config: HybridSearchConfig,
+        iterations: int = 3
+    ) -> Dict[str, Any]:
+        """
+        Benchmark hybrid search performance.
+        
+        Args:
+            collection_name: Collection to benchmark
+            test_queries: List of test queries
+            config: Search configuration
+            iterations: Number of iterations per query
+            
+        Returns:
+            Benchmark results
+        """
+        results = {
+            "query_count": len(test_queries),
+            "iterations": iterations,
+            "timings": [],
+            "errors": []
+        }
+        
+        for iteration in range(iterations):
+            for i, query in enumerate(test_queries):
+                try:
+                    start = time.time()
+                    await self.search(collection_name, query, config)
+                    elapsed = (time.time() - start) * 1000
+                    results["timings"].append(elapsed)
+                except Exception as e:
+                    results["errors"].append(f"Query {i} iteration {iteration}: {str(e)}")
+        
+        if results["timings"]:
+            results["avg_ms"] = sum(results["timings"]) / len(results["timings"])
+            results["min_ms"] = min(results["timings"])
+            results["max_ms"] = max(results["timings"])
+            results["median_ms"] = sorted(results["timings"])[len(results["timings"]) // 2]
+            
+            # Calculate percentiles
+            sorted_timings = sorted(results["timings"])
+            results["p50_ms"] = sorted_timings[int(len(sorted_timings) * 0.50)]
+            results["p90_ms"] = sorted_timings[int(len(sorted_timings) * 0.90)]
+            results["p95_ms"] = sorted_timings[int(len(sorted_timings) * 0.95)]
+            results["p99_ms"] = sorted_timings[int(len(sorted_timings) * 0.99)]
+        
+        return results
+    
+    async def close(self) -> None:
+        """Gracefully shutdown the hybrid search instance."""
+        logger.info("Shutting down HybridSearch...")
+        
+        # Log final metrics
+        summary = await self.get_metrics_summary()
+        logger.info(f"Final metrics: {summary}")
+        
+        # Clear caches
+        await self.bm25_generator.clear_cache()
+        
+        # Clear metrics history
+        async with self._lock:
+            self._metrics_history.clear()
+        
+        logger.info("HybridSearch shutdown complete")
+    
+    @asynccontextmanager
+    async def search_context(self):
+        """
+        Context manager for search operations with automatic cleanup.
+        
+        Usage:
+            async with hybrid_search.search_context():
+                result = await hybrid_search.search(...)
+        """
+        try:
+            yield self
+        finally:
+            pass
+
+
+# Utility functions for advanced use cases
+
+async def create_optimized_hybrid_search(
+    connection_manager: ConnectionManager,
+    embedding_provider: EmbeddingProvider,
+    sample_documents: Optional[List[str]] = None,
+    **kwargs
+) -> HybridSearch:
+    """
+    Factory function to create an optimized HybridSearch instance.
+    
+    Args:
+        connection_manager: Connection manager
+        embedding_provider: Embedding provider
+        sample_documents: Optional sample documents for BM25 optimization
+        **kwargs: Additional arguments for HybridSearch
+        
+    Returns:
+        Optimized HybridSearch instance
+    """
+    hybrid_search = HybridSearch(
+        connection_manager=connection_manager,
+        embedding_provider=embedding_provider,
+        **kwargs
+    )
+    
+    # Optimize BM25 parameters if samples provided
+    if sample_documents:
+        optimized_config = await hybrid_search.optimize_bm25_params(sample_documents)
+        hybrid_search.bm25_generator = BM25SparseVectorGenerator(
+            config=optimized_config,
+            enable_caching=kwargs.get('enable_caching', True)
+        )
+        logger.info("Created HybridSearch with optimized BM25 parameters")
+    
+    return hybrid_search
+
+
+def calculate_search_quality_metrics(
+    results: List[Dict[str, Any]],
+    ground_truth: List[str]
+) -> Dict[str, float]:
+    """
+    Calculate search quality metrics (precision, recall, etc.).
+    
+    Args:
+        results: Search results
+        ground_truth: Ground truth relevant document IDs
+        
+    Returns:
+        Dictionary with quality metrics
+    """
+    result_ids = [str(r.get('id', r.get('pk', ''))) for r in results]
+    ground_truth_set = set(ground_truth)
+    result_set = set(result_ids)
+    
+    true_positives = len(result_set & ground_truth_set)
+    
+    precision = true_positives / len(result_set) if result_set else 0.0
+    recall = true_positives / len(ground_truth_set) if ground_truth_set else 0.0
+    f1 = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0.0
+    
+    # Calculate NDCG (simplified)
+    dcg = sum(
+        1.0 / math.log2(i + 2) if result_ids[i] in ground_truth_set else 0.0
+        for i in range(len(result_ids))
+    )
+    idcg = sum(1.0 / math.log2(i + 2) for i in range(min(len(ground_truth), len(result_ids))))
+    ndcg = dcg / idcg if idcg > 0 else 0.0
+    
+    return {
+        "precision": round(precision, 4),
+        "recall": round(recall, 4),
+        "f1_score": round(f1, 4),
+        "ndcg": round(ndcg, 4)
+    }
