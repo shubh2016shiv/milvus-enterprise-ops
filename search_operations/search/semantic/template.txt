@@ -1,0 +1,652 @@
+"""
+Semantic Search Operations
+
+This module provides implementation for semantic (dense vector) search operations,
+focusing on similarity search using vector embeddings with production-grade reliability,
+fault tolerance, and observability.
+"""
+
+import time
+import logging
+import asyncio
+from typing import List, Dict, Any, Optional, Union, Callable
+from dataclasses import dataclass, field
+from enum import Enum
+from contextlib import asynccontextmanager
+from functools import wraps
+
+from connection_management import ConnectionManager
+from ...core.exceptions import (
+    SearchError, 
+    InvalidSearchParametersError,
+    ConnectionError,
+    TimeoutError,
+    EmbeddingGenerationError
+)
+from ...config.semantic import SemanticSearchConfig
+from ...providers.embedding import EmbeddingProvider
+from ...core.base import BaseSearch, SearchResult
+
+logger = logging.getLogger(__name__)
+
+
+class SearchStatus(Enum):
+    """Enumeration of search operation states"""
+    SUCCESS = "success"
+    FAILURE = "failure"
+    TIMEOUT = "timeout"
+    PARTIAL = "partial"
+    RETRYING = "retrying"
+
+
+@dataclass
+class SearchMetrics:
+    """Comprehensive metrics for search operations"""
+    query_hash: str
+    embedding_time_ms: float = 0.0
+    search_time_ms: float = 0.0
+    total_time_ms: float = 0.0
+    results_count: int = 0
+    retry_count: int = 0
+    status: SearchStatus = SearchStatus.SUCCESS
+    error_message: Optional[str] = None
+    cache_hit: bool = False
+    collection_name: str = ""
+    timestamp: float = field(default_factory=time.time)
+
+
+@dataclass
+class RetryConfig:
+    """Configuration for retry behavior"""
+    max_retries: int = 3
+    initial_delay: float = 0.5
+    max_delay: float = 30.0
+    exponential_base: float = 2.0
+    jitter: bool = True
+    retriable_exceptions: tuple = (ConnectionError, TimeoutError)
+
+
+class CircuitBreaker:
+    """
+    Circuit breaker pattern implementation for fault tolerance.
+    Prevents cascading failures by temporarily blocking requests when error threshold is exceeded.
+    """
+    
+    def __init__(
+        self,
+        failure_threshold: int = 5,
+        recovery_timeout: float = 60.0,
+        expected_exception: type = Exception
+    ):
+        self.failure_threshold = failure_threshold
+        self.recovery_timeout = recovery_timeout
+        self.expected_exception = expected_exception
+        self.failure_count = 0
+        self.last_failure_time: Optional[float] = None
+        self.state = "closed"  # closed, open, half_open
+        self._lock = asyncio.Lock()
+    
+    async def call(self, func: Callable, *args, **kwargs):
+        """Execute function with circuit breaker protection"""
+        async with self._lock:
+            if self.state == "open":
+                if time.time() - self.last_failure_time >= self.recovery_timeout:
+                    self.state = "half_open"
+                    logger.info("Circuit breaker entering half-open state")
+                else:
+                    raise SearchError("Circuit breaker is OPEN - too many failures")
+        
+        try:
+            result = await func(*args, **kwargs)
+            async with self._lock:
+                if self.state == "half_open":
+                    self.state = "closed"
+                    self.failure_count = 0
+                    logger.info("Circuit breaker closed - service recovered")
+            return result
+        except self.expected_exception as e:
+            async with self._lock:
+                self.failure_count += 1
+                self.last_failure_time = time.time()
+                
+                if self.failure_count >= self.failure_threshold:
+                    self.state = "open"
+                    logger.error(f"Circuit breaker OPENED after {self.failure_count} failures")
+                
+            raise
+
+
+class SemanticSearch(BaseSearch[SemanticSearchConfig]):
+    """
+    Production-grade implementation of semantic (dense vector) search.
+    
+    Features:
+    - Automatic retry with exponential backoff
+    - Circuit breaker for fault tolerance
+    - Comprehensive metrics and observability
+    - Request validation and sanitization
+    - Graceful degradation
+    - Connection pooling support
+    - Query optimization
+    """
+    
+    def __init__(
+        self,
+        connection_manager: ConnectionManager,
+        embedding_provider: EmbeddingProvider,
+        enable_caching: bool = True,
+        retry_config: Optional[RetryConfig] = None,
+        enable_circuit_breaker: bool = True,
+        metrics_callback: Optional[Callable[[SearchMetrics], None]] = None,
+        max_batch_size: int = 100,
+        enable_query_optimization: bool = True
+    ):
+        """
+        Initialize semantic search with production features.
+        
+        Args:
+            connection_manager: ConnectionManager for Milvus operations
+            embedding_provider: Provider for generating embeddings
+            enable_caching: Whether to enable embedding caching
+            retry_config: Configuration for retry behavior
+            enable_circuit_breaker: Enable circuit breaker pattern
+            metrics_callback: Optional callback for metrics reporting
+            max_batch_size: Maximum batch size for bulk operations
+            enable_query_optimization: Enable query optimization features
+        """
+        super().__init__(connection_manager, embedding_provider, enable_caching)
+        
+        self.retry_config = retry_config or RetryConfig()
+        self.metrics_callback = metrics_callback
+        self.max_batch_size = max_batch_size
+        self.enable_query_optimization = enable_query_optimization
+        
+        # Initialize circuit breaker
+        self.circuit_breaker = None
+        if enable_circuit_breaker:
+            self.circuit_breaker = CircuitBreaker(
+                failure_threshold=5,
+                recovery_timeout=60.0,
+                expected_exception=SearchError
+            )
+        
+        # Metrics storage
+        self._metrics_history: List[SearchMetrics] = []
+        self._lock = asyncio.Lock()
+        
+        logger.info(
+            f"SemanticSearch initialized - caching: {enable_caching}, "
+            f"circuit_breaker: {enable_circuit_breaker}, "
+            f"max_retries: {self.retry_config.max_retries}"
+        )
+    
+    def _validate_search_params(
+        self,
+        collection_name: str,
+        query: str,
+        config: SemanticSearchConfig
+    ) -> None:
+        """
+        Validate search parameters before execution.
+        
+        Args:
+            collection_name: Collection name to validate
+            query: Query string to validate
+            config: Search configuration to validate
+            
+        Raises:
+            InvalidSearchParametersError: If parameters are invalid
+        """
+        if not collection_name or not collection_name.strip():
+            raise InvalidSearchParametersError("Collection name cannot be empty")
+        
+        if not query or not query.strip():
+            raise InvalidSearchParametersError("Query cannot be empty")
+        
+        if config.top_k <= 0:
+            raise InvalidSearchParametersError(f"top_k must be positive, got {config.top_k}")
+        
+        if config.top_k > 16384:  # Milvus limit
+            raise InvalidSearchParametersError(
+                f"top_k exceeds maximum allowed value (16384), got {config.top_k}"
+            )
+        
+        if config.timeout and config.timeout <= 0:
+            raise InvalidSearchParametersError(
+                f"timeout must be positive, got {config.timeout}"
+            )
+        
+        # Validate metric type
+        valid_metrics = ["L2", "IP", "COSINE", "HAMMING", "JACCARD"]
+        if config.metric_type and config.metric_type.upper() not in valid_metrics:
+            raise InvalidSearchParametersError(
+                f"Invalid metric_type: {config.metric_type}. "
+                f"Must be one of {valid_metrics}"
+            )
+    
+    def _sanitize_query(self, query: str) -> str:
+        """
+        Sanitize query string to prevent injection attacks.
+        
+        Args:
+            query: Raw query string
+            
+        Returns:
+            Sanitized query string
+        """
+        # Remove control characters
+        sanitized = "".join(char for char in query if ord(char) >= 32 or char == "\n")
+        
+        # Trim and normalize whitespace
+        sanitized = " ".join(sanitized.split())
+        
+        # Limit length
+        max_length = 10000
+        if len(sanitized) > max_length:
+            logger.warning(f"Query truncated from {len(sanitized)} to {max_length} characters")
+            sanitized = sanitized[:max_length]
+        
+        return sanitized
+    
+    def _calculate_backoff_delay(self, attempt: int) -> float:
+        """
+        Calculate exponential backoff delay with jitter.
+        
+        Args:
+            attempt: Current retry attempt number
+            
+        Returns:
+            Delay in seconds
+        """
+        delay = min(
+            self.retry_config.initial_delay * (self.retry_config.exponential_base ** attempt),
+            self.retry_config.max_delay
+        )
+        
+        if self.retry_config.jitter:
+            import random
+            delay *= (0.5 + random.random())
+        
+        return delay
+    
+    async def _execute_with_retry(
+        self,
+        func: Callable,
+        *args,
+        **kwargs
+    ) -> Any:
+        """
+        Execute function with automatic retry logic.
+        
+        Args:
+            func: Async function to execute
+            *args: Positional arguments
+            **kwargs: Keyword arguments
+            
+        Returns:
+            Function result
+            
+        Raises:
+            Exception: If all retries exhausted
+        """
+        last_exception = None
+        
+        for attempt in range(self.retry_config.max_retries + 1):
+            try:
+                return await func(*args, **kwargs)
+            except self.retry_config.retriable_exceptions as e:
+                last_exception = e
+                
+                if attempt < self.retry_config.max_retries:
+                    delay = self._calculate_backoff_delay(attempt)
+                    logger.warning(
+                        f"Attempt {attempt + 1}/{self.retry_config.max_retries + 1} failed: {str(e)}. "
+                        f"Retrying in {delay:.2f}s..."
+                    )
+                    await asyncio.sleep(delay)
+                else:
+                    logger.error(
+                        f"All {self.retry_config.max_retries + 1} attempts failed"
+                    )
+            except Exception as e:
+                # Non-retriable exception
+                logger.error(f"Non-retriable exception occurred: {str(e)}")
+                raise
+        
+        raise last_exception
+    
+    def _optimize_search_params(
+        self,
+        config: SemanticSearchConfig,
+        collection_info: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """
+        Optimize search parameters based on configuration and collection info.
+        
+        Args:
+            config: Search configuration
+            collection_info: Optional collection metadata
+            
+        Returns:
+            Optimized search parameters
+        """
+        params = config.params.copy() if config.params else {}
+        
+        # Auto-tune nprobe for IVF indexes
+        if self.enable_query_optimization and "nprobe" not in params:
+            if config.top_k <= 10:
+                params["nprobe"] = 16
+            elif config.top_k <= 100:
+                params["nprobe"] = 32
+            else:
+                params["nprobe"] = 64
+        
+        # Auto-tune ef for HNSW indexes
+        if self.enable_query_optimization and "ef" not in params:
+            params["ef"] = max(config.top_k * 2, 64)
+        
+        return params
+    
+    async def search(
+        self,
+        collection_name: str,
+        query: str,
+        config: SemanticSearchConfig,
+        request_id: Optional[str] = None
+    ) -> SearchResult:
+        """
+        Perform semantic search operation with full production features.
+        
+        This method handles the complete semantic search workflow with:
+        - Parameter validation and sanitization
+        - Automatic retry with exponential backoff
+        - Circuit breaker protection
+        - Comprehensive metrics collection
+        - Query optimization
+        
+        Args:
+            collection_name: Name of the collection to search
+            query: Query text
+            config: Semantic search configuration
+            request_id: Optional request ID for tracing
+            
+        Returns:
+            SearchResult with hits and metadata
+            
+        Raises:
+            InvalidSearchParametersError: If parameters are invalid
+            SearchError: If search operation fails after retries
+        """
+        start_time = time.time()
+        metrics = SearchMetrics(
+            query_hash=str(hash(query)),
+            collection_name=collection_name
+        )
+        
+        try:
+            # Validate parameters
+            self._validate_search_params(collection_name, query, config)
+            
+            # Sanitize query
+            sanitized_query = self._sanitize_query(query)
+            
+            # Generate query embedding with retry
+            embedding_start = time.time()
+            query_vector = await self._execute_with_retry(
+                self._generate_embedding,
+                sanitized_query
+            )
+            metrics.embedding_time_ms = (time.time() - embedding_start) * 1000
+            
+            # Optimize search parameters
+            optimized_params = self._optimize_search_params(config)
+            
+            # Prepare search parameters
+            search_params = {
+                "data": [query_vector],
+                "anns_field": config.search_field,
+                "param": optimized_params,
+                "limit": config.top_k,
+                "expr": config.expr,
+                "output_fields": config.output_fields or [],
+                "consistency_level": getattr(config, "consistency_level", "Bounded")
+            }
+            
+            # Add request ID for tracing if provided
+            if request_id:
+                logger.info(f"Executing search with request_id: {request_id}")
+            
+            # Execute search with circuit breaker and retry
+            search_start = time.time()
+            
+            if self.circuit_breaker:
+                results, execution_time_ms = await self.circuit_breaker.call(
+                    self._execute_with_retry,
+                    self._execute_search,
+                    collection_name=collection_name,
+                    search_params=search_params,
+                    timeout=config.timeout
+                )
+            else:
+                results, execution_time_ms = await self._execute_with_retry(
+                    self._execute_search,
+                    collection_name=collection_name,
+                    search_params=search_params,
+                    timeout=config.timeout
+                )
+            
+            metrics.search_time_ms = (time.time() - search_start) * 1000
+            metrics.results_count = len(results)
+            metrics.status = SearchStatus.SUCCESS
+            
+            # Create search result with enriched metadata
+            search_result = SearchResult(
+                hits=results,
+                total_hits=len(results),
+                took_ms=execution_time_ms,
+                search_params={
+                    "type": "semantic",
+                    "field": config.search_field,
+                    "top_k": config.top_k,
+                    "metric_type": config.metric_type,
+                    "params": optimized_params,
+                    "optimized": self.enable_query_optimization,
+                    "request_id": request_id
+                }
+            )
+            
+            logger.info(
+                f"Semantic search completed - collection: {collection_name}, "
+                f"results: {len(results)}, "
+                f"embedding_time: {metrics.embedding_time_ms:.2f}ms, "
+                f"search_time: {metrics.search_time_ms:.2f}ms"
+            )
+            
+            return search_result
+            
+        except InvalidSearchParametersError as e:
+            metrics.status = SearchStatus.FAILURE
+            metrics.error_message = str(e)
+            logger.error(f"Invalid search parameters: {str(e)}")
+            raise
+            
+        except Exception as e:
+            metrics.status = SearchStatus.FAILURE
+            metrics.error_message = str(e)
+            error_msg = f"Semantic search failed: {str(e)}"
+            logger.error(error_msg, exc_info=True)
+            raise SearchError(error_msg) from e
+            
+        finally:
+            # Record total time and store metrics
+            metrics.total_time_ms = (time.time() - start_time) * 1000
+            
+            async with self._lock:
+                self._metrics_history.append(metrics)
+                # Keep last 1000 metrics
+                if len(self._metrics_history) > 1000:
+                    self._metrics_history = self._metrics_history[-1000:]
+            
+            # Call metrics callback if provided
+            if self.metrics_callback:
+                try:
+                    self.metrics_callback(metrics)
+                except Exception as e:
+                    logger.error(f"Metrics callback failed: {str(e)}")
+    
+    async def batch_search(
+        self,
+        collection_name: str,
+        queries: List[str],
+        config: SemanticSearchConfig,
+        request_id: Optional[str] = None
+    ) -> List[SearchResult]:
+        """
+        Perform batch semantic search with automatic batching.
+        
+        Args:
+            collection_name: Name of the collection to search
+            queries: List of query texts
+            config: Semantic search configuration
+            request_id: Optional request ID for tracing
+            
+        Returns:
+            List of SearchResult objects
+            
+        Raises:
+            InvalidSearchParametersError: If parameters are invalid
+            SearchError: If search operation fails
+        """
+        if not queries:
+            raise InvalidSearchParametersError("Queries list cannot be empty")
+        
+        # Split into batches
+        results = []
+        for i in range(0, len(queries), self.max_batch_size):
+            batch = queries[i:i + self.max_batch_size]
+            batch_results = await asyncio.gather(
+                *[
+                    self.search(collection_name, query, config, request_id)
+                    for query in batch
+                ],
+                return_exceptions=True
+            )
+            
+            # Handle exceptions in batch
+            for j, result in enumerate(batch_results):
+                if isinstance(result, Exception):
+                    logger.error(
+                        f"Query {i + j} failed in batch: {str(result)}"
+                    )
+                    raise SearchError(f"Batch search failed at index {i + j}") from result
+                results.append(result)
+        
+        return results
+    
+    async def get_metrics_summary(self) -> Dict[str, Any]:
+        """
+        Get summary of search metrics.
+        
+        Returns:
+            Dictionary with metrics summary
+        """
+        async with self._lock:
+            if not self._metrics_history:
+                return {"message": "No metrics available"}
+            
+            total_searches = len(self._metrics_history)
+            successful = sum(1 for m in self._metrics_history if m.status == SearchStatus.SUCCESS)
+            failed = sum(1 for m in self._metrics_history if m.status == SearchStatus.FAILURE)
+            
+            avg_embedding_time = sum(m.embedding_time_ms for m in self._metrics_history) / total_searches
+            avg_search_time = sum(m.search_time_ms for m in self._metrics_history) / total_searches
+            avg_total_time = sum(m.total_time_ms for m in self._metrics_history) / total_searches
+            
+            return {
+                "total_searches": total_searches,
+                "successful": successful,
+                "failed": failed,
+                "success_rate": successful / total_searches if total_searches > 0 else 0,
+                "avg_embedding_time_ms": round(avg_embedding_time, 2),
+                "avg_search_time_ms": round(avg_search_time, 2),
+                "avg_total_time_ms": round(avg_total_time, 2),
+                "circuit_breaker_state": self.circuit_breaker.state if self.circuit_breaker else "disabled"
+            }
+    
+    async def health_check(self) -> Dict[str, Any]:
+        """
+        Perform health check of the search system.
+        
+        Returns:
+            Health status dictionary
+        """
+        health = {
+            "status": "healthy",
+            "timestamp": time.time(),
+            "components": {}
+        }
+        
+        try:
+            # Check connection
+            conn_healthy = await self.connection_manager.health_check()
+            health["components"]["connection"] = {
+                "status": "healthy" if conn_healthy else "unhealthy"
+            }
+            
+            # Check embedding provider
+            embed_healthy = await self.embedding_provider.health_check()
+            health["components"]["embedding"] = {
+                "status": "healthy" if embed_healthy else "unhealthy"
+            }
+            
+            # Check circuit breaker
+            if self.circuit_breaker:
+                health["components"]["circuit_breaker"] = {
+                    "state": self.circuit_breaker.state,
+                    "failures": self.circuit_breaker.failure_count
+                }
+            
+            # Overall status
+            if not (conn_healthy and embed_healthy):
+                health["status"] = "degraded"
+            
+            if self.circuit_breaker and self.circuit_breaker.state == "open":
+                health["status"] = "unhealthy"
+            
+        except Exception as e:
+            health["status"] = "unhealthy"
+            health["error"] = str(e)
+            logger.error(f"Health check failed: {str(e)}")
+        
+        return health
+    
+    async def close(self) -> None:
+        """
+        Gracefully shutdown the search instance.
+        """
+        logger.info("Shutting down SemanticSearch...")
+        
+        # Log final metrics
+        summary = await self.get_metrics_summary()
+        logger.info(f"Final metrics: {summary}")
+        
+        # Clear metrics history
+        async with self._lock:
+            self._metrics_history.clear()
+        
+        logger.info("SemanticSearch shutdown complete")
+    
+    @asynccontextmanager
+    async def search_context(self):
+        """
+        Context manager for search operations with automatic cleanup.
+        
+        Usage:
+            async with search.search_context():
+                result = await search.search(...)
+        """
+        try:
+            yield self
+        finally:
+            # Perform any cleanup needed
+            pass
