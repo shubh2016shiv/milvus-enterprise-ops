@@ -62,3 +62,5 @@ ujson==5.11.0
     # via pymilvus
 win32-setctime==1.2.0
     # via loguru
+
+google-generativeai
