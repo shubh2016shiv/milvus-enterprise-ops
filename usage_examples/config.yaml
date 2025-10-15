@@ -1,10 +1,20 @@
 # Configuration for Milvus Usage Examples
 
-milvus:
+connection:
   host: localhost
-  port: 19530
+  port: "19530"
+  user: "user"
+  password: "password"
   timeout: 30
   connection_pool_size: 10
+  secure: false
+  retry_count: 3
+  retry_interval: 1.0
+  max_requests_per_second: 1000
+  rate_limiter_burst_multiplier: 2.0
+  enable_retry_budget: true
+  retry_budget_min_success_rate: 0.8
+  retry_budget_window_seconds: 10
 
 # Test collection names
 test_collections:
