@@ -43,11 +43,18 @@ def _flush_collection(alias: str, collection_name: str):
     collection = Collection(collection_name, using=alias)
     collection.flush()
 
-def _query_collection(alias: str, collection_name: str, expr: str, output_fields: list):
-    """Helper function to query collection."""
+def _query_collection(alias: str, collection_name: str, expr: str, output_fields: list, limit: int = 16384):
+    """
+    Helper function to query collection.
+
+    CRITICAL FIX: Added 'limit' parameter with Milvus maximum (16,384) to prevent
+    incomplete results. PyMilvus defaults to a lower limit causing incorrect entity
+    counts and missing IDs in existence checks. For counting all entities, use
+    get_collection_stats() API instead - querying "pk >= 0" is unreliable.
+    """
     from pymilvus import Collection
     collection = Collection(collection_name, using=alias)
-    return collection.query(expr=expr, output_fields=output_fields)
+    return collection.query(expr=expr, output_fields=output_fields, limit=limit)
 
 
 async def main():
@@ -179,28 +186,39 @@ async def main():
         if description.load_state.value != "Loaded":
             print_info("Loading", "Collection needs to be loaded for verification")
             await coll_manager.load_collection(COLLECTION_NAME, wait=True)
-        
-        # Use a direct query to count entities
-        query_results = await conn_manager.execute_operation_async(
+
+        # ============================================================================
+        # CRITICAL FIX: Verify sample of inserted IDs instead of counting all rows
+        # ============================================================================
+        # THREE PROBLEMS WE'RE AVOIDING:
+        # 1. Stats API (get_collection_stats) returns STALE/CACHED data after flush
+        # 2. Querying "pk >= 0" hits 16,384 result limit - fails for large collections
+        # 3. For 1000 inserts, we can't verify all if collection already has >15,384 rows
+        #
+        # SOLUTION: Query a sample of inserted IDs directly (reliable & efficient)
+        # ============================================================================
+        sample_size = min(100, len(result.inserted_ids))
+        sample_ids_str = ', '.join(map(str, result.inserted_ids[:sample_size]))
+        verify_results = await conn_manager.execute_operation_async(
             lambda alias: _query_collection(
                 alias,
                 COLLECTION_NAME,
-                "pk >= 0",  # Match all entities
-                ["pk"]
+                f"pk in [{sample_ids_str}]",
+                ["pk"],
+                limit=sample_size + 10  # Small buffer for safety
             )
         )
-        
-        final_count = len(query_results)
-        
-        print_info("Initial count", initial_count)
-        print_info("Inserted", result.successful_count)
-        print_info("Final count", final_count)
-        print_info("Net increase", final_count - initial_count)
-        
-        if final_count >= initial_count + result.successful_count:
-            print_success("All data successfully persisted")
+
+        verified_count = len(verify_results) if verify_results else 0
+
+        print_info("Sample size", sample_size)
+        print_info("Verified", verified_count)
+        print_info("Total inserted", result.successful_count)
+
+        if verified_count >= sample_size:
+            print_success("Sample verification passed - data successfully persisted")
         else:
-            print_error("Some data may not have been persisted")
+            print_error(f"Only {verified_count} of {sample_size} sample entities verified")
     except Exception as e:
         print_error(f"Verification failed: {e}")
     

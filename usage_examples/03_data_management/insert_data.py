@@ -43,11 +43,18 @@ def _flush_collection(alias: str, collection_name: str):
     collection.flush()
 
 
-def _query_collection(alias: str, collection_name: str, expr: str, output_fields: list):
-    """Helper function to query collection."""
+def _query_collection(alias: str, collection_name: str, expr: str, output_fields: list, limit: int = 16384):
+    """
+    Helper function to query collection.
+
+    CRITICAL FIX: Added 'limit' parameter with Milvus maximum (16,384) to prevent
+    incomplete results. PyMilvus defaults to a lower limit causing incorrect entity
+    counts and missing IDs in existence checks. For counting all entities, use
+    get_collection_stats() API instead - querying "pk >= 0" is unreliable.
+    """
     from pymilvus import Collection
     collection = Collection(collection_name, using=alias)
-    return collection.query(expr=expr, output_fields=output_fields)
+    return collection.query(expr=expr, output_fields=output_fields, limit=limit)
 
 
 async def main():
@@ -165,25 +172,29 @@ async def main():
         if description.load_state.value != "Loaded":
             print_info("Loading", "Collection needs to be loaded for verification")
             await coll_manager.load_collection(COLLECTION_NAME, wait=True)
-        
-        # Use a direct query to count entities
-        query_results = await conn_manager.execute_operation_async(
+
+        # CRITICAL FIX: Query inserted IDs directly to verify persistence.
+        # Stats API (get_collection_stats) returns cached/stale data and shows 0 after flush.
+        # Querying specific IDs is reliable and doesn't hit the 16,384 limit for verification.
+        inserted_ids_str = ', '.join(map(str, result.inserted_ids[:20]))  # Check first 20
+        verify_results = await conn_manager.execute_operation_async(
             lambda alias: _query_collection(
                 alias,
                 COLLECTION_NAME,
-                "pk >= 0",  # Match all entities
-                ["pk"]
+                f"pk in [{inserted_ids_str}]",
+                ["pk"],
+                limit=100  # Small limit since we're verifying specific IDs
             )
         )
-        
-        actual_count = len(query_results)
-        print_info("Total entities in collection", actual_count)
-        print_info("Newly inserted", result.successful_count)
 
-        if actual_count >= result.successful_count:
+        verified_count = len(verify_results) if verify_results else 0
+        print_info("Verified entities", verified_count)
+        print_info("Expected to verify", min(20, result.successful_count))
+
+        if verified_count >= min(20, result.successful_count):
             print_success("Data successfully persisted")
         else:
-            print_error("Some data may not have been persisted")
+            print_error(f"Only {verified_count} of {result.successful_count} entities verified")
     except Exception as e:
         print_error(f"Verification failed: {e}")
     

@@ -41,11 +41,18 @@ def _flush_collection(alias: str, collection_name: str):
     collection.flush()
 
 
-def _query_collection(alias: str, collection_name: str, expr: str, output_fields: list):
-    """Helper function to query collection."""
+def _query_collection(alias: str, collection_name: str, expr: str, output_fields: list, limit: int = 16384):
+    """
+    Helper function to query collection.
+
+    CRITICAL FIX: Added 'limit' parameter with Milvus maximum (16,384) to prevent
+    incomplete results. PyMilvus defaults to a lower limit causing incorrect entity
+    counts and missing IDs in existence checks. For counting all entities, use
+    get_collection_stats() API instead - querying "pk >= 0" is unreliable.
+    """
     from pymilvus import Collection
     collection = Collection(collection_name, using=alias)
-    return collection.query(expr=expr, output_fields=output_fields)
+    return collection.query(expr=expr, output_fields=output_fields, limit=limit)
 
 
 async def main():
@@ -77,41 +84,65 @@ async def main():
         description = await coll_manager.describe_collection(COLLECTION_NAME)
         if description.load_state.value != "Loaded":
             await coll_manager.load_collection(COLLECTION_NAME, wait=True)
-        
-        # Get actual count by querying (stats may be cached)
-        results = await conn_manager.execute_operation_async(
-            lambda alias: _query_collection(alias, COLLECTION_NAME, "pk >= 0", ["pk"])
+
+        # ============================================================================
+        # CRITICAL FIX: Query sample entities to verify collection has data
+        # ============================================================================
+        # PROBLEM WE'RE AVOIDING:
+        # Stats API (get_collection_stats) returns STALE/CACHED data showing 0 entities
+        # even right after successful insert+flush operations (e.g., shows 0 when 1020 exist)
+        #
+        # SOLUTION: Query first 10 entities to check if collection has data (real-time check)
+        # ============================================================================
+        sample_check = await conn_manager.execute_operation_async(
+            lambda alias: _query_collection(
+                alias,
+                COLLECTION_NAME,
+                "pk >= 0",
+                ["pk"],
+                limit=10  # Just need to know if ANY data exists
+            )
         )
-        entity_count = len(results) if results else 0
-        
-        if entity_count == 0:
+
+        if not sample_check or len(sample_check) == 0:
             print_error("Collection is empty")
             print_info("Hint", "Run insert_data.py first")
             conn_manager.close()
             return
-        
-        print_success(f"Collection has {entity_count} entities")
+
+        entity_count = len(sample_check)  # At least this many
+        print_success(f"Collection has data (found at least {entity_count} entities)")
     except Exception as e:
         print_error(f"Collection check failed: {e}")
         conn_manager.close()
         return
-    
+
     # Step 3: Prepare Upsert Data
     print_step(3, "Prepare Upsert Data (Mix of Updates and Inserts)")
     try:
-        # Generate data for upsert
-        # IDs 1-10: Update existing entities
-        # IDs 5001-5010: Insert new entities
-        
-        update_ids = list(range(1, 11))
-        insert_ids = list(range(5001, 5011))
-        all_ids = update_ids + insert_ids
-        
+        # Check which entities actually exist (IDs 1-10)
+        potential_update_ids = list(range(1, 11))
+        existing_results = await conn_manager.execute_operation_async(
+            lambda alias: _query_collection(
+                alias,
+                COLLECTION_NAME,
+                f"pk in [{', '.join(map(str, potential_update_ids))}]",
+                ["pk"]
+            )
+        )
+        existing_ids = set([r['pk'] for r in existing_results]) if existing_results else set()
+
+        # Determine actual updates vs inserts
+        update_ids = [id for id in potential_update_ids if id in existing_ids]
+        insert_from_expected_updates = [id for id in potential_update_ids if id not in existing_ids]
+        new_insert_ids = list(range(5001, 5011))
+        all_ids = potential_update_ids + new_insert_ids
+
         data = generate_test_data(len(all_ids), VECTOR_DIM, include_metadata=True)
         data['id'] = all_ids
-        
+
         print_info("Entities to update (existing)", len(update_ids))
-        print_info("Entities to insert (new)", len(insert_ids))
+        print_info("Entities to insert (new)", len(insert_from_expected_updates) + len(new_insert_ids))
         print_info("Total upsert", len(all_ids))
         
         # Convert to documents
@@ -142,10 +173,10 @@ async def main():
         )
         
         print_success(f"Upserted {result.successful_count} entities")
-        print_info("Updated (existing)", len(update_ids))
-        print_info("Inserted (new)", len(insert_ids))
+        print_info("Actual updates", len(update_ids))
+        print_info("Actual inserts", len(insert_from_expected_updates) + len(new_insert_ids))
         print_info("Status", result.status)
-        
+
         if result.failed_count > 0:
             print_error(f"{result.failed_count} entities failed")
     except Exception as e:
@@ -189,38 +220,66 @@ async def main():
         await conn_manager.execute_operation_async(
             lambda alias: _flush_collection(alias, COLLECTION_NAME)
         )
-        
-        # Get actual count by querying
-        results = await conn_manager.execute_operation_async(
-            lambda alias: _query_collection(alias, COLLECTION_NAME, "pk >= 0", ["pk"])
+
+        # ============================================================================
+        # CRITICAL FIX: Verify upserted IDs directly instead of counting all rows
+        # ============================================================================
+        # TWO PROBLEMS WE'RE AVOIDING:
+        # 1. Stats API (get_collection_stats) returns STALE/CACHED data after flush
+        #    - Shows old count (e.g., 1010) instead of new count (1024)
+        # 2. Querying "pk >= 0" hits 16,384 result limit - fails for large collections
+        #
+        # SOLUTION: Query the specific IDs we just upserted (only 20 IDs = fast & accurate)
+        # ============================================================================
+        all_upserted_ids = potential_update_ids + new_insert_ids
+        upserted_ids_str = ', '.join(map(str, all_upserted_ids))
+        verify_results = await conn_manager.execute_operation_async(
+            lambda alias: _query_collection(
+                alias,
+                COLLECTION_NAME,
+                f"pk in [{upserted_ids_str}]",
+                ["pk"],
+                limit=len(all_upserted_ids) + 5  # Small buffer
+            )
         )
-        final_count = len(results) if results else 0
-        print_info("Total entities after upsert", final_count)
-        print_success("Changes persisted")
+
+        verified_count = len(verify_results) if verify_results else 0
+        print_info("Upserted IDs", len(all_upserted_ids))
+        print_info("Verified IDs", verified_count)
+
+        if verified_count == len(all_upserted_ids):
+            print_success("All upserted entities verified successfully")
+        else:
+            missing = len(all_upserted_ids) - verified_count
+            print_error(f"Verification failed! {missing} entities not found")
     except Exception as e:
         print_error(f"Verification failed: {e}")
-    
-    # Step 6: Query Updated Entity
-    print_step(6, "Query an Updated Entity to Verify")
+
+    # Step 6: Query an Upserted Entity to Verify
+    print_step(6, "Query an Upserted Entity to Verify")
     try:
         # Ensure collection is loaded
         description = await coll_manager.describe_collection(COLLECTION_NAME)
         if description.load_state.value != "Loaded":
             await coll_manager.load_collection(COLLECTION_NAME, wait=True)
-        
-        # Query entity with PK=1 (should be updated)
+
+        # Query entity with PK=1 (either updated or inserted)
         results = await conn_manager.execute_operation_async(
             lambda alias: _query_collection(alias, COLLECTION_NAME, "pk == 1", ["pk", "text", "value", "category"])
         )
         
         if results:
-            print("\n  Updated Entity (PK=1):")
+            entity_type = "Updated" if 1 in existing_ids else "Inserted"
+            print(f"\n  {entity_type} Entity (PK=1):")
             for field, value in results[0].items():
                 if field != "vector":
                     print(f"    {field}: {value}")
-            print_success("Update verified - text should start with 'UPDATED:'")
+            if 1 in existing_ids:
+                print_success("Update verified - text should start with 'UPDATED:'")
+            else:
+                print_success("Insert verified - entity was newly created")
         else:
-            print_error("Could not retrieve updated entity")
+            print_error("Could not retrieve entity")
     except Exception as e:
         print_error(f"Query failed: {e}")
     

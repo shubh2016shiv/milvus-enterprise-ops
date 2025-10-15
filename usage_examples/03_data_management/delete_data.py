@@ -39,11 +39,18 @@ def _flush_collection(alias: str, collection_name: str):
     collection.flush()
 
 
-def _query_collection(alias: str, collection_name: str, expr: str, output_fields: list):
-    """Helper function to query collection."""
+def _query_collection(alias: str, collection_name: str, expr: str, output_fields: list, limit: int = 16384):
+    """
+    Helper function to query collection.
+
+    CRITICAL FIX: Added 'limit' parameter with Milvus maximum (16,384) to prevent
+    incomplete results. PyMilvus defaults to a lower limit causing incorrect entity
+    counts and missing IDs in existence checks. For counting all entities, use
+    get_collection_stats() API instead - querying "pk >= 0" is unreliable.
+    """
     from pymilvus import Collection
     collection = Collection(collection_name, using=alias)
-    return collection.query(expr=expr, output_fields=output_fields)
+    return collection.query(expr=expr, output_fields=output_fields, limit=limit)
 
 
 async def main():
