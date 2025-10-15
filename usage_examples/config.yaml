@@ -1,0 +1,44 @@
+# Configuration for Milvus Usage Examples
+
+milvus:
+  host: localhost
+  port: 19530
+  timeout: 30
+  connection_pool_size: 10
+
+# Test collection names
+test_collections:
+  simple: "test_simple_collection"
+  vectors: "test_vectors_collection"
+  search: "test_search_collection"
+  backup: "test_backup_collection"
+
+# Vector dimensions for different test scenarios
+vector_dimensions:
+  small: 128      # For quick tests
+  medium: 768     # Typical embedding dimension
+  large: 1536     # Large embedding models
+
+# Index parameters
+index_params:
+  ivf_flat:
+    nlist: 128
+  hnsw:
+    M: 16
+    efConstruction: 200
+  annoy:
+    n_trees: 8
+
+# Search parameters
+search_params:
+  default_top_k: 10
+  max_top_k: 100
+  
+# Data generation
+test_data:
+  small_batch: 20
+  medium_batch: 100
+  large_batch: 1000
+
+
+
