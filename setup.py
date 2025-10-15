@@ -7,9 +7,9 @@ from setuptools import setup, find_packages
 setup(
     name="milvus_ops",
     version="0.1.0",
-    description="Professional Milvus Vector Database Operations Package",
-    author="RhythmX",
-    author_email="info@rhythmx.ai",
+    description="Milvus Vector Database Operations Package",
+    author="Shubham Singh",
+    author_email="shubh2014shiv@gmail.com",
     packages=find_packages(),
     install_requires=[
         "pymilvus>=2.3.0",
