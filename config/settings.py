@@ -9,16 +9,21 @@ from typing import Dict, Any, Optional, List, Union
 from enum import Enum
 from pathlib import Path
 import os
+import inspect
+import logging
 
 from pydantic import Field
 from pydantic_settings import BaseSettings
 from pydantic_yaml import to_yaml_str, to_yaml_file
 
+# Logger setup
+logger = logging.getLogger(__name__)
+
 
 class ConsistencyLevel(str, Enum):
     """
     Milvus consistency level options that determine the trade-off between consistency and performance.
-    
+
     The consistency level affects how reads and writes are synchronized across distributed nodes:
     - Higher consistency levels provide stronger guarantees but may impact performance
     - Lower consistency levels offer better performance but weaker guarantees
@@ -32,7 +37,7 @@ class ConsistencyLevel(str, Enum):
 class MetricType(str, Enum):
     """
     Milvus metric type options for measuring distance/similarity between vectors.
-    
+
     The choice of metric type significantly impacts search results and should match your embedding model:
     - Different metrics are suitable for different types of vector data and use cases
     - The metric type must be compatible with your index type
@@ -48,7 +53,7 @@ class MetricType(str, Enum):
 class IndexType(str, Enum):
     """
     Milvus index type options that determine search algorithm, performance characteristics, and memory usage.
-    
+
     The choice of index type involves trade-offs between:
     - Search speed: How quickly results can be returned
     - Search accuracy: How precise the results are compared to exact search
@@ -67,30 +72,30 @@ class IndexType(str, Enum):
 class ConnectionSettings(BaseSettings):
     """
     Connection settings for establishing and maintaining connections to Milvus server.
-    
+
     These settings control how the client connects to the Milvus server, including:
     - Server location and authentication
     - Connection security and timeout behavior
     - Connection pooling for performance optimization
     - Retry behavior for resilience against transient failures
     """
-    host: str = Field("localhost", env="MILVUS_HOST", 
+    host: str = Field("localhost", env="MILVUS_HOST",
                      description="Hostname or IP address of the Milvus server")
-    port: str = Field("19530", env="MILVUS_PORT", 
+    port: str = Field("19530", env="MILVUS_PORT",
                      description="Port number on which Milvus server is listening")
-    user: str = Field("", env="MILVUS_USER", 
+    user: str = Field("", env="MILVUS_USER",
                      description="Username for authentication (if enabled on server)")
-    password: str = Field("", env="MILVUS_PASSWORD", 
+    password: str = Field("", env="MILVUS_PASSWORD",
                          description="Password for authentication (if enabled on server)")
-    secure: bool = Field(False, env="MILVUS_SECURE", 
+    secure: bool = Field(False, env="MILVUS_SECURE",
                         description="Whether to use TLS/SSL for secure connection")
-    timeout: int = Field(60, env="MILVUS_TIMEOUT", 
+    timeout: int = Field(60, env="MILVUS_TIMEOUT",
                         description="Connection timeout in seconds")
-    connection_pool_size: int = Field(10, env="MILVUS_CONNECTION_POOL_SIZE", 
+    connection_pool_size: int = Field(10, env="MILVUS_CONNECTION_POOL_SIZE",
                                      description="Maximum number of connections to maintain in the pool")
-    retry_count: int = Field(3, env="MILVUS_RETRY_COUNT", 
+    retry_count: int = Field(3, env="MILVUS_RETRY_COUNT",
                             description="Number of times to retry failed operations")
-    retry_interval: float = Field(1.0, env="MILVUS_RETRY_INTERVAL", 
+    retry_interval: float = Field(1.0, env="MILVUS_RETRY_INTERVAL",
                                  description="Time in seconds to wait between retry attempts")
     max_requests_per_second: int = Field(1000, env="MILVUS_MAX_REQUESTS_PER_SECOND",
                                         description="Maximum requests per second (rate limiting, 0=disabled)")
@@ -111,7 +116,7 @@ class ConnectionSettings(BaseSettings):
 class CollectionSettings(BaseSettings):
     """
     Collection settings for Milvus collections configuration.
-    
+
     These settings control the behavior of Milvus collections, including:
     - ID generation strategy
     - Consistency guarantees for distributed operations
@@ -133,7 +138,7 @@ class CollectionSettings(BaseSettings):
 class HNSWIndexParams(BaseSettings):
     """
     HNSW (Hierarchical Navigable Small World) index parameters.
-    
+
     HNSW is a graph-based indexing algorithm that offers excellent performance-accuracy trade-offs:
     - Creates a multi-layered graph structure for efficient navigation
     - Provides logarithmic search complexity
@@ -149,7 +154,7 @@ class HNSWIndexParams(BaseSettings):
 class IVFIndexParams(BaseSettings):
     """
     IVF (Inverted File) index parameters.
-    
+
     IVF is a clustering-based indexing algorithm:
     - Divides the vector space into clusters (nlist)
     - During search, only the closest clusters are examined (nprobe)
@@ -163,7 +168,7 @@ class IVFIndexParams(BaseSettings):
 class HNSWSearchParams(BaseSettings):
     """
     HNSW search parameters for controlling search behavior at query time.
-    
+
     These parameters control the trade-off between search speed and accuracy:
     - Can be adjusted at query time without rebuilding the index
     - Allow fine-tuning performance based on specific query requirements
@@ -176,7 +181,7 @@ class HNSWSearchParams(BaseSettings):
 class IVFSearchParams(BaseSettings):
     """
     IVF search parameters for controlling search behavior at query time.
-    
+
     These parameters determine which and how many clusters are searched:
     - Can be adjusted at query time without rebuilding the index
     - Directly controls the trade-off between search speed and recall
@@ -189,7 +194,7 @@ class IVFSearchParams(BaseSettings):
 class IndexSettings(BaseSettings):
     """
     Index settings for different index types supported by Milvus.
-    
+
     This class consolidates settings for all index types in one place:
     - Provides consistent configuration interface for all index types
     - Allows selecting appropriate index type based on data characteristics
@@ -203,7 +208,7 @@ class IndexSettings(BaseSettings):
                                         description="Distance metric for HNSW index (COSINE recommended for semantic search)")
     hnsw_params: HNSWIndexParams = Field(default_factory=HNSWIndexParams,
                                         description="HNSW-specific parameters for index building")
-    
+
     # IVF index settings
     ivf_index_type: IndexType = Field(IndexType.IVF_FLAT, env="MILVUS_IVF_INDEX_TYPE",
                                      description="Index type for IVF-based indexes")
@@ -211,13 +216,13 @@ class IndexSettings(BaseSettings):
                                        description="Distance metric for IVF index")
     ivf_params: IVFIndexParams = Field(default_factory=IVFIndexParams,
                                       description="IVF-specific parameters for index building")
-    
+
     # FLAT index settings (exact search)
     flat_index_type: IndexType = Field(IndexType.FLAT, env="MILVUS_FLAT_INDEX_TYPE",
                                       description="Index type for exact (brute force) search")
     flat_metric_type: MetricType = Field(MetricType.COSINE, env="MILVUS_FLAT_METRIC_TYPE",
                                         description="Distance metric for FLAT index")
-    
+
     # Sparse vector index settings
     sparse_index_type: IndexType = Field(IndexType.SPARSE_INVERTED_INDEX, env="MILVUS_SPARSE_INDEX_TYPE",
                                         description="Index type for sparse vectors (used in hybrid search)")
@@ -233,7 +238,7 @@ class IndexSettings(BaseSettings):
 class SearchSettings(BaseSettings):
     """
     Search settings for controlling query behavior across different index types.
-    
+
     These settings determine how vector similarity searches are performed:
     - Configures search parameters for each index type
     - Controls the balance between search speed and accuracy
@@ -245,21 +250,21 @@ class SearchSettings(BaseSettings):
                                         description="Distance metric for HNSW search (should match index metric type)")
     hnsw_params: HNSWSearchParams = Field(default_factory=HNSWSearchParams,
                                          description="HNSW-specific parameters for search optimization")
-    
+
     # IVF search settings
     ivf_metric_type: MetricType = Field(MetricType.COSINE, env="MILVUS_IVF_SEARCH_METRIC_TYPE",
                                        description="Distance metric for IVF search (should match index metric type)")
     ivf_params: IVFSearchParams = Field(default_factory=IVFSearchParams,
                                        description="IVF-specific parameters for search optimization")
-    
+
     # FLAT search settings
     flat_metric_type: MetricType = Field(MetricType.COSINE, env="MILVUS_FLAT_SEARCH_METRIC_TYPE",
                                         description="Distance metric for FLAT search (exact search)")
-    
+
     # Sparse vector search settings
     sparse_metric_type: MetricType = Field(MetricType.IP, env="MILVUS_SPARSE_SEARCH_METRIC_TYPE",
                                           description="Distance metric for sparse vector search")
-    
+
     # Hybrid search weights
     hybrid_sparse_weight: float = Field(0.3, env="MILVUS_HYBRID_SPARSE_WEIGHT",
                                        description="Weight for sparse vector results in hybrid search (0.0-1.0)")
@@ -275,7 +280,7 @@ class SearchSettings(BaseSettings):
 class InsertionSettings(BaseSettings):
     """
     Insertion settings for controlling data ingestion into Milvus.
-    
+
     These settings determine how data is inserted into Milvus collections:
     - Controls batch processing behavior for optimized throughput
     - Configures validation checks to ensure data integrity
@@ -299,7 +304,7 @@ class InsertionSettings(BaseSettings):
 class MonitoringSettings(BaseSettings):
     """
     Monitoring settings for tracking Milvus operations and performance.
-    
+
     These settings configure how the system monitors and reports on Milvus operations:
     - Controls metrics collection for performance analysis
     - Configures logging verbosity for troubleshooting
@@ -323,7 +328,7 @@ class MonitoringSettings(BaseSettings):
 class BackupSettings(BaseSettings):
     """
     Backup settings for Milvus data protection and recovery.
-    
+
     These settings configure how Milvus data is backed up and retained:
     - Specifies storage location for backup files
     - Controls compression to optimize storage space
@@ -345,20 +350,20 @@ class BackupSettings(BaseSettings):
 class MilvusSettings(BaseSettings):
     """
     Main settings class for Milvus operations that consolidates all configuration categories.
-    
+
     This class serves as the central configuration hub for the entire Milvus_Ops package:
     - Provides a unified interface for all Milvus-related settings
     - Supports loading from YAML files via YamlModelMixin
     - Enables environment variable overrides for all nested settings
     - Organizes settings into logical categories for better maintainability
-    
+
     Usage:
         # Load from environment variables and defaults
         settings = MilvusSettings()
-        
+
         # Load from YAML file
         settings = MilvusSettings.from_yaml('config.yaml')
-        
+
         # Access nested settings
         host = settings.connection.host
         batch_size = settings.insertion.batch_size
@@ -382,39 +387,96 @@ class MilvusSettings(BaseSettings):
         env_prefix = ""
         case_sensitive = False
         env_nested_delimiter = "__"
+        extra = "allow"  # Allow extra fields for usage_examples custom config sections
 
     @classmethod
     def from_yaml(cls, yaml_file: Union[str, Path]) -> "MilvusSettings":
-        """Load settings from YAML file"""
+        """
+        Load settings from YAML file with YAML taking final authority.
+
+        This method temporarily disables environment variable overrides to ensure
+        that YAML configuration values take precedence over any environment variables.
+        """
         import yaml
         with open(yaml_file, 'r') as f:
             data = yaml.safe_load(f)
-        return cls(**data)
+
+        # Create instance from YAML data without env var overrides
+        # by temporarily disabling env var reading
+        env_backup = {}
+        env_keys = [key for key in os.environ.keys() if key.startswith('MILVUS_')]
+        for key in env_keys:
+            env_backup[key] = os.environ.pop(key)
+
+        try:
+            settings = cls(**data)
+        finally:
+            # Restore environment variables
+            os.environ.update(env_backup)
+
+        return settings
 
 
 def load_settings(config_path: Optional[str] = None) -> MilvusSettings:
     """
-    Load settings from file and/or environment variables.
-    
-    This function provides a convenient way to load settings from different sources:
-    - If config_path is provided and exists, loads settings from the YAML file
-    - Otherwise, creates a new settings instance with values from environment variables
-    - The resulting settings object contains all configuration needed for Milvus operations
-    
+    Load settings with auto-discovery support.
+
+    This function implements intelligent configuration discovery to simplify config management
+    across different usage contexts (usage examples vs main module code).
+
+    Priority order:
+    1. If config_path provided and exists, load from that YAML file
+    2. Auto-discover: Check for usage_examples/config.yaml relative to caller
+    3. Auto-discover: Check for config/default_settings.yaml
+    4. Fall back to environment variables and defaults
+
+    When YAML file is found, it takes final authority (env vars don't override).
+
     Args:
-        config_path: Path to YAML configuration file. If None or file doesn't exist,
-                    falls back to environment variables and default values.
-            
+        config_path: Path to YAML configuration file. If None, auto-discovery is used.
+                    If provided but doesn't exist, falls back to auto-discovery.
+
     Returns:
         MilvusSettings object with loaded configuration
-        
+
     Example:
-        # Load from specific config file
+        # Explicit path (highest priority)
         settings = load_settings("/path/to/config.yaml")
-        
-        # Load from environment variables and defaults
+
+        # Auto-discovery (recommended)
         settings = load_settings()
+        # - From usage_examples: loads usage_examples/config.yaml
+        # - From main code: loads config/default_settings.yaml
+        # - No YAML found: uses environment variables and defaults
     """
-    if config_path and os.path.exists(config_path):
-        return MilvusSettings.from_yaml(config_path)
+    # If explicit path provided, use it (takes priority)
+    if config_path:
+        if os.path.exists(config_path):
+            logger.info(f"Loading config from explicit path: {config_path}")
+            return MilvusSettings.from_yaml(config_path)
+        else:
+            logger.warning(f"Config path {config_path} not found, falling back to auto-discovery")
+
+    # Auto-discovery: Find the caller's directory
+    frame = inspect.currentframe().f_back
+    caller_file = frame.f_code.co_filename if frame else None
+
+    # Check if caller is in usage_examples directory
+    if caller_file and 'usage_examples' in caller_file:
+        # Try usage_examples/config.yaml
+        usage_config = os.path.join(os.path.dirname(caller_file), '..', 'config.yaml')
+        usage_config = os.path.abspath(usage_config)
+        if os.path.exists(usage_config):
+            logger.info(f"Auto-discovered config: {usage_config}")
+            return MilvusSettings.from_yaml(usage_config)
+
+    # Try config/default_settings.yaml from project root
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    default_config = os.path.join(project_root, 'config', 'default_settings.yaml')
+    if os.path.exists(default_config):
+        logger.info(f"Loading default config: {default_config}")
+        return MilvusSettings.from_yaml(default_config)
+
+    # Fall back to environment variables and defaults
+    logger.info("No YAML config found, using environment variables and defaults")
     return MilvusSettings()
