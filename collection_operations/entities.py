@@ -80,7 +80,7 @@ class CollectionDescription(BaseModel):
 
     Attributes:
         name: The unique name of the collection.
-        schema: The `CollectionSchema` object that defines the collection's structure.
+        collection_schema: The `CollectionSchema` object that defines the collection's structure.
         id: The unique identifier for the collection, assigned by Milvus.
         created_at: The timestamp when the collection was created.
         schema_hash: A deterministic hash of the functional parts of the schema, used
@@ -92,7 +92,7 @@ class CollectionDescription(BaseModel):
                                  was not available from the server.
     """
     name: str = Field(..., description="The unique name of the collection.")
-    schema: CollectionSchema = Field(..., description="The schema defining the collection's structure.")
+    collection_schema: CollectionSchema = Field(..., description="The schema defining the collection's structure.")
     id: str = Field(..., description="The logical identifier of the collection. Note: This is a logical ID used for tracking, not necessarily a server-assigned GUID.")
     created_at: datetime = Field(..., description="The timestamp of when the collection was created.")
     schema_hash: str = Field(..., description="A hash of the functional schema for compatibility checks.")

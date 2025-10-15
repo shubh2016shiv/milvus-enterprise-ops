@@ -17,7 +17,7 @@ from pymilvus.exceptions import (
 )
 
 from connection_management import ConnectionManager
-from exceptions import (
+from milvus_ops_exceptions import (
     CollectionError, 
     CollectionNotFoundError, 
     SchemaError, 
@@ -182,7 +182,7 @@ class CollectionManager:
                 try:
                     description = await self.describe_collection(collection_name)
                     description = await self._ensure_awaited(description)
-                    existing_schema = description.schema
+                    existing_schema = description.collection_schema
                     
                     # Compare schemas
                     is_compatible, incompatibilities = await SchemaValidator.compare_schemas(
@@ -593,23 +593,31 @@ class CollectionManager:
         # to track more detailed state transitions
         collection_state = CollectionState.AVAILABLE
         
-        # Check load state
+        # Check load state using utility.load_state() - most reliable method
         load_state = LoadState.UNLOADED
-        # Handle different pymilvus versions - some have is_loaded attribute, some don't
         try:
-            is_loaded = getattr(collection, "is_loaded", False)
-            if is_loaded:
+            from pymilvus import utility
+            load_state_info = utility.load_state(collection_name, using=alias)
+            # Convert to string for comparison (handles enum, string, or dict)
+            state_str = str(load_state_info).lower()
+            if 'loaded' in state_str:
                 load_state = LoadState.LOADED
-        except (AttributeError, TypeError):
-            # If attribute doesn't exist or can't be accessed, assume unloaded
-            load_state = LoadState.UNLOADED
+        except Exception:
+            # Fallback: try collection attribute
+            try:
+                is_loaded = getattr(collection, "is_loaded", False)
+                if is_loaded:
+                    load_state = LoadState.LOADED
+            except (AttributeError, TypeError):
+                # If all methods fail, assume unloaded
+                load_state = LoadState.UNLOADED
         
         # For future control-plane integration, we could detect in-progress operations
         # by checking for locks or operation records in a metadata store
         
         return CollectionDescription(
             name=collection_name,
-            schema=schema,
+            collection_schema=schema,
             id=collection_id,
             created_at=created_at,
             schema_hash=schema_hash,
@@ -704,20 +712,72 @@ class CollectionManager:
                 start_time = time.time()
                 poll_interval = 0.5  # Start with 0.5s polling interval
                 max_poll_interval = 5.0  # Cap at 5s
+                iteration = 0
+                
+                logger.info(f"Waiting for collection '{collection_name}' to load (timeout={timeout}s)...")
                 
                 while True:
+                    iteration += 1
+                    
                     # Check progress
                     progress = await self.get_load_progress(collection_name, timeout=timeout)
                     
+                    # Log progress every 5 iterations for debugging
+                    if iteration % 5 == 0:
+                        logger.info(
+                            f"Load progress for '{collection_name}': "
+                            f"state={progress.state.value}, progress={progress.progress:.2%}, "
+                            f"iteration={iteration}"
+                        )
+                    
                     if progress.is_complete:
+                        logger.info(f"Collection '{collection_name}' load complete: state={progress.state.value}")
                         return progress
                     
                     # Check timeout
                     elapsed = time.time() - start_time
                     if timeout and elapsed > timeout:
-                        error_msg = f"Timed out waiting for collection '{collection_name}' to load after {elapsed:.1f}s"
+                        error_msg = (
+                            f"Timed out waiting for collection '{collection_name}' to load after {elapsed:.1f}s. "
+                            f"Last state: {progress.state.value}, progress: {progress.progress:.2%}"
+                        )
                         logger.error(error_msg)
                         raise OperationTimeoutError(error_msg)
+                    
+                    # SAFETY: If we've been stuck at 0% progress for too long, something is wrong
+                    if iteration > 20 and progress.progress == 0.0:
+                        error_msg = (
+                            f"Collection '{collection_name}' appears stuck at 0% progress after {iteration} iterations. "
+                            f"State: {progress.state.value}. This may indicate the collection is already loaded "
+                            f"or there's an issue with progress reporting."
+                        )
+                        logger.warning(error_msg)
+                        # Try one more check with utility.load_state
+                        try:
+                            from pymilvus import utility
+                            load_state_info = await self._connection_manager.execute_operation_async(
+                                lambda alias: utility.load_state(collection_name, using=alias),
+                                timeout=5.0
+                            )
+                            logger.info(f"Direct load_state check: {load_state_info}")
+                            # If it's actually loaded, return success
+                            if isinstance(load_state_info, dict):
+                                state_value = str(load_state_info.get('state', '')).lower()
+                                if 'loaded' in state_value:
+                                    return LoadProgress(
+                                        collection_name=collection_name,
+                                        state=LoadState.LOADED,
+                                        progress=1.0,
+                                        loaded_segments=0,
+                                        total_segments=0
+                                    )
+                        except Exception as check_error:
+                            logger.error(f"Failed to verify load state: {check_error}")
+                        
+                        # If still not loaded after 20 iterations, raise error
+                        raise OperationTimeoutError(
+                            f"Collection load appears stuck. {error_msg}"
+                        )
                     
                     # Wait before checking again with gentle backoff
                     await asyncio.sleep(poll_interval)
@@ -790,12 +850,31 @@ class CollectionManager:
         This method handles different responses from various PyMilvus versions
         and normalizes them into a consistent `LoadProgress` object.
         """
-        from pymilvus import Collection
+        from pymilvus import Collection, utility
         
         # Get the collection
         collection = Collection(name=collection_name, using=alias)
         
-        # Check if loaded - handle different pymilvus versions
+        # CRITICAL FIX: Check load state using utility.load_state() first
+        # This is the most reliable way to determine if a collection is loaded
+        try:
+            load_state_info = utility.load_state(collection_name, using=alias)
+            # load_state_info can be an enum, string, or dict
+            # Convert to string for comparison
+            state_str = str(load_state_info).lower()
+            
+            if 'loaded' in state_str:
+                return LoadProgress(
+                    collection_name=collection_name,
+                    state=LoadState.LOADED,
+                    progress=1.0,
+                    loaded_segments=0,
+                    total_segments=0
+                )
+        except Exception as e:
+            logger.debug(f"Could not get load state via utility.load_state: {e}")
+        
+        # Check if loaded using collection attribute - handle different pymilvus versions
         try:
             is_loaded = getattr(collection, "is_loaded", False)
             if is_loaded:
@@ -803,8 +882,8 @@ class CollectionManager:
                     collection_name=collection_name,
                     state=LoadState.LOADED,
                     progress=1.0,
-                    loaded_segments=0,  # Don't fake segment counts
-                    total_segments=0    # Don't fake segment counts
+                    loaded_segments=0,
+                    total_segments=0
                 )
         except (AttributeError, TypeError):
             # If we can't determine loaded state, try to get progress anyway
@@ -828,24 +907,25 @@ class CollectionManager:
             except Exception:
                 pass
                 
-            # If all else fails, return a default progress
+            # CRITICAL FIX: If we can't get progress info, assume collection is UNLOADED
+            # rather than LOADING. This prevents infinite loops when progress is unavailable.
             return LoadProgress(
                 collection_name=collection_name,
-                state=LoadState.LOADING,
-                progress=0.0,  # Use 0.0 to indicate unknown progress
+                state=LoadState.UNLOADED,
+                progress=0.0,
                 loaded_segments=0,
                 total_segments=0,
-                error_message="Progress information unavailable"  # Explicitly indicate unknown progress
+                error_message="Progress information unavailable - assuming unloaded"
             )
         except (AttributeError, TypeError) as e:
-            # Older versions of pymilvus might not have loading_progress
+            # CRITICAL FIX: Return UNLOADED state instead of LOADING
             return LoadProgress(
                 collection_name=collection_name,
-                state=LoadState.LOADING,
-                progress=0.0,  # Use 0.0 to indicate unknown progress
+                state=LoadState.UNLOADED,
+                progress=0.0,
                 loaded_segments=0,
                 total_segments=0,
-                error_message=f"Progress information unavailable: {e}"  # Explicitly indicate unknown progress
+                error_message=f"Progress information unavailable: {e}"
             )
     
     async def release_collection(self, collection_name: str, timeout: Optional[float] = None) -> bool:
