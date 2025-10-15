@@ -30,7 +30,8 @@ from .connection_exceptions import (
     ConnectionClosedError,
     ConnectionInitializationError,
     MaxRetriesExceededError,
-    ServerUnavailableError
+    ServerUnavailableError,
+    OperationTimeoutError
 )
 
 __all__ = [
@@ -49,4 +50,5 @@ __all__ = [
     'ConnectionInitializationError',
     'MaxRetriesExceededError',
     'ServerUnavailableError',
+    'OperationTimeoutError',
 ]

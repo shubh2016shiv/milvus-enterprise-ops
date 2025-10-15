@@ -12,7 +12,10 @@ These exceptions contribute to system robustness by:
 - Facilitating proper resource cleanup in error scenarios
 """
 
-from exceptions import ConnectionError as BaseConnectionError
+from milvus_ops_exceptions import (
+    ConnectionError as BaseConnectionError,
+    OperationTimeoutError
+)
 
 
 class ConnectionError(BaseConnectionError):
@@ -102,3 +105,19 @@ class ServerUnavailableError(ConnectionError):
     different recovery strategies for each scenario.
     """
     pass
+
+
+# Re-export OperationTimeoutError from base exceptions for convenience
+# This is defined in milvus_ops_exceptions.py but re-exported here
+# so connection_manager can import it from connection_exceptions
+__all__ = [
+    'ConnectionError',
+    'ConnectionPoolExhaustedError',
+    'ConnectionTimeoutError',
+    'ConnectionAuthenticationError',
+    'ConnectionClosedError',
+    'ConnectionInitializationError',
+    'MaxRetriesExceededError',
+    'ServerUnavailableError',
+    'OperationTimeoutError'
+]

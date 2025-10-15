@@ -72,7 +72,13 @@ class MilvusConnectionPool:
         with self._lock:
             if self._initialized:
                 if config is not None and config != self.config:
-                    from exceptions import ConfigurationError
+                    # Import from root exceptions using absolute path
+                    import sys
+                    import os
+                    root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+                    if root_dir not in sys.path:
+                        sys.path.insert(0, root_dir)
+                    from milvus_ops_exceptions import ConfigurationError
                     raise ConfigurationError(
                         "MilvusConnectionPool already initialized with a different configuration. "
                         "This could lead to inconsistent connection behavior."

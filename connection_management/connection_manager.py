@@ -22,9 +22,9 @@ from connection_management.circuit_breaker import MilvusCircuitBreaker, CircuitB
 from connection_management.connection_exceptions import (
     ConnectionError,
     MaxRetriesExceededError,
-    ServerUnavailableError
+    ServerUnavailableError,
+    OperationTimeoutError
 )
-from exceptions import OperationTimeoutError
 from utils.rate_limiter import TokenBucketRateLimiter
 from utils.retry_budget import RetryBudget
 
@@ -253,7 +253,20 @@ class ConnectionManager:
         """
         if self._circuit_breaker:
             # Execute with circuit breaker protection
-            return asyncio.run(self._execute_with_circuit_breaker(operation, *args, **kwargs))
+            # Check if we're already in an event loop
+            try:
+                loop = asyncio.get_running_loop()
+                # We're in an event loop, need to use run_in_executor
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor() as executor:
+                    future = executor.submit(
+                        asyncio.run, 
+                        self._execute_with_circuit_breaker(operation, *args, **kwargs)
+                    )
+                    return future.result()
+            except RuntimeError:
+                # No event loop running, safe to use asyncio.run
+                return asyncio.run(self._execute_with_circuit_breaker(operation, *args, **kwargs))
         else:
             # Execute without circuit breaker (legacy mode)
             @self.with_retry
