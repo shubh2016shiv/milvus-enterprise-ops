@@ -85,7 +85,7 @@ async def main():
             from pymilvus import utility
             return utility.list_collections(using=conn_alias)
         
-        collections = await conn_manager.execute_operation(list_collections)
+        collections = await conn_manager.execute_operation_async(list_collections)
         print_info("Collections found", len(collections))
         if collections:
             print_info("Collection names", ", ".join(collections[:5]))
