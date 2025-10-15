@@ -7,7 +7,7 @@ for hybrid search operations to ensure data integrity and security.
 
 import logging
 from typing import Any
-from ....core.exceptions import InvalidSearchParametersError
+from ....core.search_ops_exceptions import InvalidSearchParametersError
 from ....config.hybrid import HybridSearchConfig
 
 logger = logging.getLogger(__name__)

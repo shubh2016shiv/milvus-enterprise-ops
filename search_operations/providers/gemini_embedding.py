@@ -15,7 +15,7 @@ import google.generativeai as genai
 from dotenv import load_dotenv
 
 from .embedding import EmbeddingProvider, EmbeddingResult
-from ..core.exceptions import EmbeddingGenerationError
+from ..core.search_ops_exceptions import EmbeddingGenerationError
 
 # Load environment variables from a .env file
 load_dotenv()

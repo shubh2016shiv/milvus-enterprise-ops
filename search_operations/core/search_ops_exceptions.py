@@ -5,7 +5,7 @@ This module defines custom exceptions for search operations in Milvus,
 providing clear error handling and reporting for search-related issues.
 """
 
-from exceptions import QueryError
+from milvus_ops_exceptions import QueryError
 
 
 class SearchError(QueryError):

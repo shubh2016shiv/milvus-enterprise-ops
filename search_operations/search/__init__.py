@@ -7,7 +7,7 @@ metrics, and observability features.
 """
 
 # Import semantic search components
-from .semantic import SemanticSearch, SemanticSearchWithReRanking
+from .semantic import SemanticSearch
 
 # Import hybrid search components
 from .hybrid import (
@@ -26,7 +26,6 @@ from .hybrid import (
 __all__ = [
     # Semantic search
     "SemanticSearch",
-    "SemanticSearchWithReRanking",
     
     # Hybrid search
     "HybridSearch",

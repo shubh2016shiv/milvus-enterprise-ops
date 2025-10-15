@@ -65,3 +65,6 @@ class BaseSearchConfig:
             self.params = {"nprobe": 10, "ef": 64}
 
 
+
+
+

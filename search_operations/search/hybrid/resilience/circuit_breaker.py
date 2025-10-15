@@ -10,7 +10,7 @@ import asyncio
 import logging
 from typing import Callable, Any, Optional
 
-from ....core.exceptions import HybridSearchError
+from ....core.search_ops_exceptions import HybridSearchError
 
 logger = logging.getLogger(__name__)
 

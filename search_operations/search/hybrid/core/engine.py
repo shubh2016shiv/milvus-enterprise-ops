@@ -13,7 +13,7 @@ from typing import List, Dict, Any, Optional, Callable
 from contextlib import asynccontextmanager
 
 from connection_management import ConnectionManager
-from ....core.exceptions import (
+from ....core.search_ops_exceptions import (
     SearchError,
     HybridSearchError,
     InvalidSearchParametersError,

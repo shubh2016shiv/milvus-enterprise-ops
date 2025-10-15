@@ -322,7 +322,7 @@ results = await search.batch_search(
 The module provides specific exceptions for different failure scenarios:
 
 ```python
-from search_operations.core.exceptions import (
+from search_operations.core.search_ops_exceptions import (
     SearchError,
     InvalidSearchParametersError,
     SearchTimeoutError

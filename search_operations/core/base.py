@@ -11,8 +11,8 @@ from typing import List, Dict, Any, Optional, Tuple, TypeVar, Generic
 from dataclasses import dataclass, field
 
 from connection_management import ConnectionManager
-from exceptions import OperationTimeoutError
-from .exceptions import (
+from milvus_ops_exceptions import OperationTimeoutError
+from .search_ops_exceptions import (
     SearchError, 
     EmbeddingGenerationError,
     SearchTimeoutError

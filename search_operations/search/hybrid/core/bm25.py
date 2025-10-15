@@ -13,7 +13,7 @@ import logging
 from typing import Dict, Any, List, Set
 from collections import Counter, defaultdict
 
-from ....core.exceptions import SparseVectorGenerationError
+from ....core.search_ops_exceptions import SparseVectorGenerationError
 from ..utils.config import BM25Config
 
 logger = logging.getLogger(__name__)

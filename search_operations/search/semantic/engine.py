@@ -9,7 +9,7 @@ import time
 from typing import Optional, Callable, Dict, Any, List
 
 from connection_management import ConnectionManager
-from ...core.exceptions import SearchError, InvalidSearchParametersError
+from ...core.search_ops_exceptions import SearchError, InvalidSearchParametersError
 from ...config.semantic import SemanticSearchConfig
 from ...providers.embedding import EmbeddingProvider
 from ...core.base import BaseSearch, SearchResult

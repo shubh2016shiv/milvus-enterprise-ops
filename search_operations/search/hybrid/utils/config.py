@@ -113,8 +113,8 @@ class RetryConfig:
         # Set default retriable exceptions if none provided
         if not self.retriable_exceptions:
             # Import here to avoid circular dependencies
-            from ....core.exceptions import SearchTimeoutError
-            from exceptions import ConnectionError as MilvusConnectionError
+            from ....core.search_ops_exceptions import SearchTimeoutError
+            from milvus_ops_exceptions import ConnectionError as MilvusConnectionError
             
             self.retriable_exceptions = (
                 SearchTimeoutError,

@@ -14,10 +14,9 @@ from typing import List, Dict, Any, Optional, Union, Callable
 from dataclasses import dataclass, field
 from contextlib import asynccontextmanager
 
-from ..core.exceptions import (
+from ..core.search_ops_exceptions import (
     ReRankingError,
-    InvalidParametersError,
-    DependencyError
+    InvalidSearchParametersError
 )
 from ..config.base import ReRankingMethod
 from ..config.reranking import ReRankingConfig
@@ -148,7 +147,7 @@ class MilvusReRanker:
                 "Please ensure PyMilvus >= 2.3.0 is installed."
             )
             logger.error(error_msg)
-            raise DependencyError(error_msg) from e
+            raise ReRankingError(error_msg) from e
     
     def validate_weights(
         self,
@@ -235,13 +234,13 @@ class MilvusReRanker:
             True if valid, False otherwise
             
         Raises:
-            InvalidParametersError: If k is invalid
+            InvalidSearchParametersError: If k is invalid
         """
         if not isinstance(k, int):
-            raise InvalidParametersError(f"RRF k must be an integer, got {type(k)}")
+            raise InvalidSearchParametersError(f"RRF k must be an integer, got {type(k)}")
         
         if k < self.MIN_RRF_K or k > self.MAX_RRF_K:
-            raise InvalidParametersError(
+            raise InvalidSearchParametersError(
                 f"RRF k must be between {self.MIN_RRF_K} and {self.MAX_RRF_K}, got {k}"
             )
         
@@ -264,12 +263,12 @@ class MilvusReRanker:
             
         Raises:
             ReRankingError: If re-ranker creation fails
-            InvalidParametersError: If parameters are invalid
+            InvalidSearchParametersError: If parameters are invalid
         """
         try:
             if self.method == MilvusReRankingMethod.WEIGHTED:
                 if not weights:
-                    raise InvalidParametersError(
+                    raise InvalidSearchParametersError(
                         "Weights must be provided for weighted re-ranking"
                     )
                 
@@ -279,7 +278,7 @@ class MilvusReRanker:
                     
                     if not validation_result.is_valid:
                         error_msg = "; ".join(validation_result.errors)
-                        raise InvalidParametersError(f"Weight validation failed: {error_msg}")
+                        raise InvalidSearchParametersError(f"Weight validation failed: {error_msg}")
                     
                     for warning in validation_result.warnings:
                         logger.warning(f"Weight validation warning: {warning}")
@@ -300,11 +299,11 @@ class MilvusReRanker:
                 return self._rrf_ranker_class(k)
                 
             else:
-                raise InvalidParametersError(
+                raise InvalidSearchParametersError(
                     f"Unsupported re-ranking method: {self.method}"
                 )
                 
-        except (InvalidParametersError, DependencyError):
+        except (InvalidSearchParametersError, ReRankingError):
             raise
         except Exception as e:
             error_msg = f"Failed to create re-ranker: {str(e)}"
@@ -344,7 +343,7 @@ class MilvusReRanker:
             
             # Validate input search params
             if not isinstance(search_params, dict):
-                raise InvalidParametersError(
+                raise InvalidSearchParametersError(
                     f"search_params must be a dictionary, got {type(search_params)}"
                 )
             
@@ -355,13 +354,13 @@ class MilvusReRanker:
             if config.method == ReRankingMethod.WEIGHTED:
                 weights = config.params.get("weights")
                 if not weights:
-                    raise InvalidParametersError(
+                    raise InvalidSearchParametersError(
                         "Weights must be provided for weighted re-ranking"
                     )
                 
                 # Validate weight count if num_vector_fields provided
                 if num_vector_fields and len(weights) != num_vector_fields:
-                    raise InvalidParametersError(
+                    raise InvalidSearchParametersError(
                         f"Number of weights ({len(weights)}) must match "
                         f"number of vector fields ({num_vector_fields})"
                     )
@@ -379,7 +378,7 @@ class MilvusReRanker:
                 logger.info(f"Added RRF re-ranking with k={k}")
                 
             else:
-                raise InvalidParametersError(
+                raise InvalidSearchParametersError(
                     f"Unsupported re-ranking method: {config.method}"
                 )
             
@@ -388,7 +387,7 @@ class MilvusReRanker:
             
             return updated_params
             
-        except (InvalidParametersError, ReRankingError):
+        except (InvalidSearchParametersError, ReRankingError):
             raise
         except Exception as e:
             error_msg = f"Failed to prepare re-ranking parameters: {str(e)}"
@@ -701,7 +700,7 @@ class MilvusReRanker:
             try:
                 self._validate_dependencies()
                 health["components"]["pymilvus"] = {"status": "healthy"}
-            except DependencyError as e:
+            except ReRankingError as e:
                 health["components"]["pymilvus"] = {
                     "status": "unhealthy",
                     "error": str(e)
@@ -745,13 +744,13 @@ class MilvusReRanker:
             Normalized weights list
         """
         if not field_importance:
-            raise InvalidParametersError("field_importance cannot be empty")
+            raise InvalidSearchParametersError("field_importance cannot be empty")
         
         weights = list(field_importance.values())
         validation_result = self.validate_weights(weights, auto_normalize=True)
         
         if not validation_result.is_valid:
-            raise InvalidParametersError(
+            raise InvalidSearchParametersError(
                 f"Invalid importance scores: {'; '.join(validation_result.errors)}"
             )
         
@@ -1114,7 +1113,7 @@ class MultiStageReRanker:
             Final re-ranked results
         """
         if len(configs) != len(self.stages):
-            raise InvalidParametersError(
+            raise InvalidSearchParametersError(
                 f"Number of configs ({len(configs)}) must match number of stages ({len(self.stages)})"
             )
         

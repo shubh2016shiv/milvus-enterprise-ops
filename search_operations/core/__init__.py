@@ -6,7 +6,7 @@ including base classes, exceptions, and the main search manager.
 """
 
 from .base import BaseSearch, SearchResult
-from .exceptions import (
+from .search_ops_exceptions import (
     SearchError,
     InvalidSearchParametersError,
     EmbeddingGenerationError,
@@ -36,5 +36,8 @@ __all__ = [
     "FusionError",
     "EmptyResultError",
 ]
+
+
+
 
 

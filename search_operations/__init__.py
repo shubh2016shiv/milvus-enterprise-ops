@@ -55,9 +55,7 @@ from .providers import (
 # Search implementations exports
 from .search import (
     SemanticSearch,
-    SemanticSearchWithReRanking,
     HybridSearch,
-    HybridSearchWithReRanking,
 )
 
 # Reranking exports
@@ -103,9 +101,7 @@ __all__ = [
     
     # Search implementations
     "SemanticSearch",
-    "SemanticSearchWithReRanking",
     "HybridSearch",
-    "HybridSearchWithReRanking",
     
     # Reranking
     "MilvusReRanker",

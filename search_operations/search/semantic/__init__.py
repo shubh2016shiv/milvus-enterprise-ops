@@ -27,7 +27,6 @@ from .optimization import QueryOptimizer, SearchParamsBuilder
 __all__ = [
     # Core search implementations
     "SemanticSearch",
-    "SemanticSearchWithReRanking",
     
     # Metrics
     "SearchMetrics",

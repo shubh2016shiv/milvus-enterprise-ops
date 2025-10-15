@@ -6,7 +6,7 @@ for semantic search operations, ensuring data integrity and security.
 """
 
 from typing import Optional
-from ...core.exceptions import InvalidSearchParametersError
+from ...core.search_ops_exceptions import InvalidSearchParametersError
 from ...config.semantic import SemanticSearchConfig
 
 

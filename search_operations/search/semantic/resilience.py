@@ -90,7 +90,7 @@ class CircuitBreaker:
                 if time.time() - self.last_failure_time >= self.recovery_timeout:
                     self._state = CircuitState.HALF_OPEN
                 else:
-                    from ...core.exceptions import SearchError
+                    from ...core.search_ops_exceptions import SearchError
                     raise SearchError(
                         f"Circuit breaker is OPEN - service unavailable "
                         f"(failures: {self.failure_count})"
@@ -247,7 +247,7 @@ class ResilienceManager:
         """
         self.circuit_breaker = None
         if enable_circuit_breaker:
-            from ...core.exceptions import SearchError
+            from ...core.search_ops_exceptions import SearchError
             self.circuit_breaker = CircuitBreaker(
                 failure_threshold=circuit_failure_threshold,
                 recovery_timeout=circuit_recovery_timeout,
