@@ -38,70 +38,71 @@ print_error = example_utils.print_error
 print_warning = example_utils.print_warning
 
 
-BACKUP_DIR = "./backups"
+# Backup directory will be loaded from config/default_settings.yaml
 
 
 async def main():
     """Main function to demonstrate backup verification."""
     print_section("Verify Backup Example")
-    
+
     # Step 1: Initialize Managers
     print_step(1, "Initialize Managers")
     try:
         config = load_settings()
         conn_manager = ConnectionManager(config=config)
         coll_manager = CollectionManager(conn_manager)
-        
+
+        # Configure backup - settings will be loaded from YAML config
         backup_config = BackupRecoveryConfig(
             default_storage_type=BackupStorageType.LOCAL_FILE,
-            local_backup_root_path=BACKUP_DIR,
-            compression_enabled=True,
             enable_checksum_verification=True
+            # Other settings like backup_path, compression, etc. are loaded from config/default_settings.yaml
         )
-        
+
         backup_manager = BackupManager(
             connection_manager=conn_manager,
             collection_manager=coll_manager,
             config=backup_config
         )
-        
+
         print_success("Managers initialized")
     except Exception as e:
         print_error(f"Initialization failed: {e}")
         return
-    
+
     # Step 2: Check Backup Directory
     print_step(2, "Check Backup Directory")
     try:
-        if not os.path.exists(BACKUP_DIR):
-            print_error(f"Backup directory '{BACKUP_DIR}' does not exist")
+        backup_dir = backup_config.local_backup_root_path
+        if not os.path.exists(backup_dir):
+            print_error(f"Backup directory '{backup_dir}' does not exist")
             print_info("Hint", "Run create_backup.py first")
             conn_manager.close()
             return
-        
-        print_success(f"Backup directory found: {BACKUP_DIR}")
-        
+
+        print_success(f"Backup directory found: {backup_dir}")
+
         # List files in backup directory
-        files = os.listdir(BACKUP_DIR)
+        files = os.listdir(backup_dir)
         print_info("Files found", len(files))
     except Exception as e:
         print_error(f"Directory check failed: {e}")
         conn_manager.close()
         return
-    
+
     # Step 3: List All Backups
     print_step(3, "List All Available Backups")
     try:
         logger.info("Listing all backups")
         backups = await backup_manager.list_backups()
         logger.info(f"Found {len(backups)} backups")
-        
+
         if not backups:
             print_error("No backups found")
             print_info("Hint", "Run create_backup.py first")
             conn_manager.close()
             return
-        
+
         print_success(f"Found {len(backups)} backup(s)")
         print("\n  Available Backups:\n")
         for i, backup in enumerate(backups, 1):
@@ -117,15 +118,15 @@ async def main():
         print_error(f"Listing backups failed: {e}")
         conn_manager.close()
         return
-    
+
     # Step 4: Verify Each Backup
     print_step(4, "Verify Integrity of All Backups")
     try:
         verification_results = []
-        
+
         for backup in backups:
             print(f"\n  Verifying: {backup.backup_name}")
-            
+
             try:
                 logger.info(f"Verifying backup: {backup.backup_name} (ID: {backup.backup_id})")
                 is_valid = await backup_manager.verify_backup(
@@ -133,13 +134,13 @@ async def main():
                     collection_name=backup.collection_name
                 )
                 logger.info(f"Verification result: {is_valid}")
-                
+
                 verification_results.append({
                     'name': backup.backup_name,
                     'valid': is_valid,
                     'size_mb': backup.size_bytes / (1024*1024)
                 })
-                
+
                 if is_valid:
                     print_success(f"  ✓ Valid")
                 else:
@@ -151,37 +152,37 @@ async def main():
                     'valid': False,
                     'error': str(e)
                 })
-        
+
         # Summary
         valid_count = sum(1 for r in verification_results if r.get('valid', False))
         print(f"\n  Verification Summary:")
         print(f"    Total backups: {len(verification_results)}")
         print(f"    Valid: {valid_count}")
         print(f"    Invalid: {len(verification_results) - valid_count}")
-        
+
         if valid_count == len(verification_results):
             print_success("All backups are valid")
         else:
             print_warning(f"{len(verification_results) - valid_count} backup(s) failed verification")
     except Exception as e:
         print_error(f"Verification process failed: {e}")
-    
+
     # Step 5: Detailed Metadata Check
     print_step(5, "Detailed Metadata Inspection")
     try:
         # Select first backup for detailed inspection
         backup_to_inspect = backups[0]
         backup_name = backup_to_inspect.backup_name
-        
+
         print_info("Inspecting", backup_name)
-        
+
         logger.info(f"Getting detailed metadata for backup: {backup_name}")
         metadata = await backup_manager.get_backup_info(
             backup_id=backup_name,
             collection_name=backup_to_inspect.collection_name
         )
         logger.info(f"Metadata: {metadata.__dict__ if hasattr(metadata, '__dict__') else metadata}")
-        
+
         if metadata:
             print("\n  Detailed Metadata:\n")
             print(f"    Backup Name: {metadata.backup_name}")
@@ -192,22 +193,22 @@ async def main():
             print(f"    Size (MB): {metadata.size_bytes / (1024*1024):.2f}")
             print(f"    Compressed: {metadata.compression_enabled}")
             print(f"    Checksum: {metadata.checksum}")
-            
+
             if hasattr(metadata, 'schema'):
                 print(f"    Schema Fields: {len(metadata.schema.fields) if metadata.schema else 'N/A'}")
-            
+
             print()
             print_success("Metadata inspection complete")
         else:
             print_error("Could not retrieve metadata")
     except Exception as e:
         print_error(f"Metadata inspection failed: {e}")
-    
+
     # Step 6: Check File System Integrity
     print_step(6, "Check File System Integrity")
     try:
         for backup in backups:
-            backup_path = os.path.join(BACKUP_DIR, backup.backup_name)
+            backup_path = os.path.join(backup_config.local_backup_root_path, backup.backup_name)
             
             if os.path.exists(backup_path):
                 file_size = os.path.getsize(backup_path)

@@ -9,10 +9,14 @@ Note: This implementation assumes Milvus-Backup tool is installed and accessible
 
 import json
 import logging
+import os
 import subprocess
+import uuid
 from datetime import datetime
 from typing import List, Optional, Dict, Any
 from pathlib import Path
+
+from pymilvus import Collection
 
 from ..config import BackupRecoveryConfig
 from ..models.entities import (
@@ -34,23 +38,23 @@ logger = logging.getLogger(__name__)
 class MilvusNativeBackupBackend:
     """
     Milvus native backup backend using Milvus-Backup tool.
-    
+
     This backend wraps the Milvus-Backup command-line tool to provide
     backup and restore functionality using Milvus's native backup system.
-    
+
     Note: Requires Milvus-Backup tool to be installed separately.
     See: https://github.com/zilliztech/milvus-backup
-    
+
     Example:
         ```python
         backend = MilvusNativeBackupBackend(config)
-        
+
         # Create backup
         metadata = await backend.create_backup(
             collection_name="documents",
             params=backup_params
         )
-        
+
         # Restore backup
         await backend.restore_backup(
             backup_name="backup_2024_01_15",
@@ -58,68 +62,85 @@ class MilvusNativeBackupBackend:
         )
         ```
     """
-    
+
     def __init__(self, config: BackupRecoveryConfig):
         """
         Initialize Milvus native backup backend.
-        
+
         Args:
             config: Backup recovery configuration
         """
         self.config = config
         self.milvus_backup_bin = self._find_milvus_backup_binary()
-        
+
         logger.info("MilvusNativeBackupBackend initialized")
-    
+
     def _find_milvus_backup_binary(self) -> Optional[str]:
         """
         Find Milvus-Backup binary in PATH.
-        
+
         Returns:
             Path to milvus-backup binary or None
         """
         try:
+            # Check if we're on Windows or Unix-like system
+            if os.name == 'nt':  # Windows
+                cmd = ["where", "milvus-backup"]
+            else:  # Unix-like
+                cmd = ["which", "milvus-backup"]
+
             result = subprocess.run(
-                ["which", "milvus-backup"],
+                cmd,
                 capture_output=True,
                 text=True,
                 check=False
             )
             if result.returncode == 0:
                 return result.stdout.strip()
+            else:
+                logger.warning(
+                    "Milvus-backup binary not found in PATH. "
+                    "This is OK if you're using LocalBackupBackend, "
+                    "but will prevent MilvusNativeBackupBackend from working."
+                )
         except Exception as e:
             logger.warning(f"Failed to find milvus-backup binary: {e}")
-        
+
         return None
-    
+
     async def create_backup(
         self,
-        collection_name: str,
+        collection: Collection,
         params: BackupParams,
+        backup_id: Optional[str] = None,
         backup_name: Optional[str] = None,
         progress_tracker: Optional[BackupProgressTracker] = None
     ) -> BackupMetadata:
         """
         Create a backup using Milvus-Backup tool.
-        
+
         Args:
-            collection_name: Name of collection to backup
+            collection: Milvus collection to backup
             params: Backup parameters
+            backup_id: Optional backup ID (generated if not provided)
             backup_name: Optional backup name
             progress_tracker: Optional progress tracker
-        
+
         Returns:
             BackupMetadata with backup information
-        
+
         Raises:
             BackupError: If backup creation fails
         """
+        collection_name = collection.name
+
         if not self.milvus_backup_bin:
             raise BackupError(
                 "Milvus-Backup tool not found. Please install milvus-backup first.",
                 collection_name=collection_name
             )
-        
+
+        backup_id = backup_id or str(uuid.uuid4())
         backup_name = backup_name or params.backup_name or f"{collection_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         
         try:

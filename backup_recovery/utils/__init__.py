@@ -2,7 +2,7 @@
 Backup Recovery Utilities
 
 Exports utility classes for checksum calculation, compression, progress tracking,
-and retention policy management.
+query expression generation, and retention policy management.
 """
 
 from .checksum import ChecksumCalculator
@@ -13,6 +13,7 @@ from .progress import (
     get_registry
 )
 from .retention import RetentionPolicyManager
+from .query import generate_query_expression
 
 __all__ = [
     'ChecksumCalculator',
@@ -20,6 +21,7 @@ __all__ = [
     'BackupProgressTracker',
     'BackupProgressTrackerRegistry',
     'get_registry',
-    'RetentionPolicyManager'
+    'RetentionPolicyManager',
+    'generate_query_expression'
 ]
 

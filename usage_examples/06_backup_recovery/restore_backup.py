@@ -38,30 +38,31 @@ print_error = example_utils.print_error
 print_warning = example_utils.print_warning
 
 
+# Collection to restore
 COLLECTION_NAME = "test_example_collection"
 RESTORED_COLLECTION_NAME = "test_example_collection_restored"
-BACKUP_DIR = "./backups"
+# Backup directory will be loaded from config/default_settings.yaml
 
 
 async def main():
     """Main function to demonstrate backup restoration."""
     print_section("Restore Backup Example")
-    
+
     print_warning("This will create a new collection from backup")
     print(f"  Restored collection name: {RESTORED_COLLECTION_NAME}\n")
-    
+
     # Step 1: Initialize Managers
     print_step(1, "Initialize Managers")
     try:
         config = load_settings()
         conn_manager = ConnectionManager(config=config)
         coll_manager = CollectionManager(conn_manager)
-        
+
+        # Configure backup - settings will be loaded from YAML config
         backup_config = BackupRecoveryConfig(
             default_storage_type=BackupStorageType.LOCAL_FILE,
-            local_backup_root_path=BACKUP_DIR,
-            compression_enabled=True,
             enable_checksum_verification=True
+            # Other settings like backup_path, compression, etc. are loaded from config/default_settings.yaml
         )
         
         backup_manager = BackupManager(

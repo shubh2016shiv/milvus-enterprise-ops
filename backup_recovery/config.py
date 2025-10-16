@@ -87,43 +87,73 @@ class BackupRecoveryConfig:
     
     # Storage Settings
     default_storage_type: BackupStorageType = BackupStorageType.LOCAL_FILE
-    local_backup_root_path: str = "./milvus_backups"
+    # Default path will be overridden by YAML configuration if available
+    local_backup_root_path: str = "./collection_backup"
     milvus_backup_bucket: Optional[str] = None
-    
+
     # Performance Settings
     default_chunk_size_mb: int = 256
     max_concurrent_chunks: int = 4
     compression_enabled: bool = True
     compression_level: int = 6
-    
+
     # Reliability Settings
     enable_checksum_verification: bool = True
     checksum_algorithm: ChecksumAlgorithm = ChecksumAlgorithm.SHA256
     deep_verification_interval_days: int = 7
     auto_verify_after_backup: bool = True
     auto_verify_before_restore: bool = True
-    
+
     # Timeout Settings (in seconds)
     default_backup_timeout: float = 3600.0  # 1 hour
     default_restore_timeout: float = 3600.0  # 1 hour
     verification_timeout: float = 1800.0  # 30 minutes
-    
+
     # Retention Settings
     retention_count: int = 10
     retention_days: int = 30
     min_backups_to_keep: int = 3
-    
+
     # Retry Settings
     retry_transient_errors: bool = True
     max_retries: int = 3
     retry_delay_seconds: float = 5.0
-    
+
     # Monitoring Settings
     enable_timing: bool = True
     progress_poll_interval: float = 2.0
-    
+
     def __post_init__(self):
-        """Validate configuration after initialization."""
+        """
+        Initialize with settings from YAML and validate configuration.
+
+        This method loads settings from the main configuration file if available,
+        then validates the final configuration.
+        """
+        # Try to load settings from the main configuration
+        try:
+            from config import load_settings
+            settings = load_settings()
+
+            # If backup settings exist in the main config, apply them
+            if hasattr(settings, 'backup') and settings.backup:
+                if hasattr(settings.backup, 'backup_path') and settings.backup.backup_path:
+                    self.local_backup_root_path = settings.backup.backup_path
+                    logger.debug(f"Using backup path from config: {self.local_backup_root_path}")
+
+                if hasattr(settings.backup, 'compression') and settings.backup.compression is not None:
+                    self.compression_enabled = settings.backup.compression
+                    logger.debug(f"Using compression setting from config: {self.compression_enabled}")
+
+                if hasattr(settings.backup, 'retention_days') and settings.backup.retention_days:
+                    self.retention_days = settings.backup.retention_days
+                    logger.debug(f"Using retention days from config: {self.retention_days}")
+        except Exception as e:
+            logger.warning(f"Failed to load backup settings from main config: {e}")
+            logger.info(f"Using default backup settings: path={self.local_backup_root_path}, "
+                       f"compression={self.compression_enabled}, retention={self.retention_days} days")
+
+        # Validate the final configuration
         self.validate()
     
     def validate(self) -> None:
