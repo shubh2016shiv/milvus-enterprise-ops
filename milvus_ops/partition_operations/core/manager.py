@@ -8,15 +8,11 @@ with simplicity, robustness, and scalability.
 import asyncio
 import logging
 import time
-from typing import Dict, List, Optional, Union, Any
+from typing import Dict, List, Optional, Union
 from datetime import datetime
 
-from pymilvus.exceptions import (
-    CollectionNotExistException,
-    SchemaNotReadyException
-)
-from connection_management import ConnectionManager
-from connection_management.connection_exceptions import ConnectionError
+from milvus_ops.connection_management import ConnectionManager
+from milvus_ops.connection_management.connection_exceptions import ConnectionError
 from milvus_ops_exceptions import CollectionNotFoundError, OperationTimeoutError
 
 from ..models.entities import (
