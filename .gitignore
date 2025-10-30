@@ -48,3 +48,4 @@ __pypackages__/
 # Spyder project settings
 .spyderproject
 .spyproject
+**/backups/
