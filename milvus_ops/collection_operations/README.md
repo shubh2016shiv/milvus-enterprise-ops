@@ -402,7 +402,7 @@ from milvus_ops.collection_operations import (
     CollectionNotFoundError,
     SchemaError
 )
-from milvus_ops_exceptions import (
+from milvus_ops.milvus_ops_exceptions import (
     ConnectionError,
     OperationTimeoutError
 )

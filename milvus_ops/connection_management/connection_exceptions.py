@@ -12,7 +12,7 @@ These exceptions contribute to system robustness by:
 - Facilitating proper resource cleanup in error scenarios
 """
 
-from milvus_ops_exceptions import (
+from milvus_ops.milvus_ops_exceptions import (
     ConnectionError as BaseConnectionError,
     OperationTimeoutError
 )

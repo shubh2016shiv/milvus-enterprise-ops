@@ -12,8 +12,7 @@ from typing import Dict, List, Optional, Union
 from datetime import datetime
 
 from milvus_ops.connection_management import ConnectionManager
-from milvus_ops.connection_management.connection_exceptions import ConnectionError
-from milvus_ops_exceptions import CollectionNotFoundError, OperationTimeoutError
+from milvus_ops.milvus_ops_exceptions import CollectionNotFoundError, OperationTimeoutError
 
 from ..models.entities import (
     PartitionDescription, PartitionStats, LoadProgress,

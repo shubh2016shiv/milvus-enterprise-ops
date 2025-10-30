@@ -18,8 +18,8 @@ Typical usage:
         # Handle build failure
 """
 
-from typing import Dict, List, Any, Optional
-from milvus_ops_exceptions import IndexError as BaseIndexError, MilvusOpsError
+from typing import Dict, List, Optional
+from milvus_ops.milvus_ops_exceptions import IndexError as BaseIndexError
 
 
 class IndexOperationError(BaseIndexError):

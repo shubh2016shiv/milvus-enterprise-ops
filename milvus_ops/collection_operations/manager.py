@@ -17,7 +17,7 @@ from pymilvus.exceptions import (
 )
 
 from milvus_ops.connection_management import ConnectionManager
-from milvus_ops_exceptions import (
+from milvus_ops.milvus_ops_exceptions import (
     CollectionError, 
     CollectionNotFoundError, 
     SchemaError, 

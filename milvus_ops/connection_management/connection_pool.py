@@ -5,11 +5,10 @@ This module provides a thread-safe connection pool for Milvus,
 designed to handle high-volume concurrent access efficiently.
 """
 
-import time
 import logging
 import threading
 import queue
-from typing import Dict, Any, Optional, List, Callable
+from typing import Optional
 from contextlib import contextmanager
 
 from pymilvus import connections
@@ -78,7 +77,7 @@ class MilvusConnectionPool:
                     root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
                     if root_dir not in sys.path:
                         sys.path.insert(0, root_dir)
-                    from milvus_ops_exceptions import ConfigurationError
+                    from milvus_ops.milvus_ops_exceptions import ConfigurationError
                     raise ConfigurationError(
                         "MilvusConnectionPool already initialized with a different configuration. "
                         "This could lead to inconsistent connection behavior."

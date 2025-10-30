@@ -24,8 +24,8 @@ from milvus_ops.connection_management.connection_exceptions import (
     ServerUnavailableError,
     OperationTimeoutError
 )
-from utils.rate_limiter import TokenBucketRateLimiter
-from utils.retry_budget import RetryBudget
+from milvus_ops.utils.rate_limiter import TokenBucketRateLimiter
+from milvus_ops.utils.retry_budget import RetryBudget
 
 # Logger setup
 logger = logging.getLogger(__name__)

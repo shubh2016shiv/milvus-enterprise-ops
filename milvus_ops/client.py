@@ -9,8 +9,8 @@ from typing import Dict, Any, List, Optional, Union
 import logging
 from pathlib import Path
 
-from .config import MilvusSettings, load_settings
-from .exceptions import ConnectionError, ConfigurationError
+from config import MilvusSettings, load_settings
+from milvus_ops_exceptions import ConnectionError, ConfigurationError
 
 # Logger setup
 logger = logging.getLogger(__name__)

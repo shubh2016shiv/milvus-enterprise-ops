@@ -33,7 +33,7 @@ from typing import Dict, List, Any, Optional, Union
 from pymilvus import Collection
 from pymilvus.exceptions import MilvusException
 
-from milvus_ops_exceptions import (
+from milvus_ops.milvus_ops_exceptions import (
     CollectionNotFoundError as BaseCollectionNotFoundError,
     ConnectionError
 )

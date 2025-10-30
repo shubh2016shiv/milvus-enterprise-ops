@@ -37,7 +37,7 @@ root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__fil
 if root_dir not in sys.path:
     sys.path.insert(0, root_dir)
 
-from milvus_ops_exceptions import (
+from milvus_ops.milvus_ops_exceptions import (
     CollectionNotFoundError as BaseCollectionNotFoundError,
     OperationTimeoutError,
     ConnectionError,
