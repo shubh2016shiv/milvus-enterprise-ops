@@ -11,11 +11,10 @@ Demonstrates comprehensive backup and recovery operations including:
 
 import asyncio
 import logging
-from datetime import datetime
 
 from ..connection_management import ConnectionManager
-from ..collection_operations import CollectionManager
-from ..config import MilvusSettings
+from milvus_ops.collection_operations import CollectionManager
+from config import MilvusSettings
 
 # Import backup recovery components
 from . import (

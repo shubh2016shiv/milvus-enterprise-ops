@@ -7,15 +7,13 @@ for multiple storage backends and comprehensive validation.
 
 import asyncio
 import logging
-import uuid
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Optional, List, Dict, Any
-from pathlib import Path
 
-from pymilvus import Collection, utility
+from pymilvus import Collection
 
-from connection_management import ConnectionManager
-from collection_operations import CollectionManager
+from milvus_ops.connection_management import ConnectionManager
+from milvus_ops.collection_operations import CollectionManager
 from ..config import BackupRecoveryConfig
 from ..models.entities import (
     BackupMetadata,
@@ -28,12 +26,10 @@ from ..models.entities import (
 )
 from ..models.parameters import BackupParams, RestoreParams, VerificationParams
 from ..exceptions import (
-    BackupError,
     RestoreError,
-    BackupNotFoundError,
-    BackupInProgressError
+    BackupNotFoundError
 )
-from ..utils.progress import BackupProgressTracker, get_registry
+from ..utils.progress import get_registry
 from ..utils.retention import RetentionPolicyManager
 from .local_backend import LocalBackupBackend
 from .milvus_backend import MilvusNativeBackupBackend

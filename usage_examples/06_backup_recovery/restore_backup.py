@@ -17,12 +17,10 @@ logging.basicConfig(
 )
 logger = logging.getLogger("restore_example")
 
-# Add parent directory to path for imports
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 
-from connection_management import ConnectionManager
-from collection_operations import CollectionManager
-from backup_recovery import BackupManager, BackupRecoveryConfig, BackupStorageType
+from milvus_ops.connection_management import ConnectionManager
+from milvus_ops.collection_operations import CollectionManager
+from milvus_ops.backup_recovery import BackupManager, BackupRecoveryConfig, BackupStorageType
 from config import load_settings
 # Import usage_examples utils (not the project's utils package)
 import importlib.util
@@ -151,7 +149,7 @@ async def main():
         print_info("Target collection", RESTORED_COLLECTION_NAME)
         print_info("Status", "Restoring...")
         
-        from backup_recovery import RestoreParams
+        from milvus_ops.backup_recovery import RestoreParams
         restore_params = RestoreParams(target_collection_name=RESTORED_COLLECTION_NAME)
         logger.info(f"Restore params: {restore_params}")
         

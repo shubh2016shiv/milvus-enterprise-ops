@@ -8,7 +8,6 @@ Shows backup configuration, execution, and verification.
 import sys
 import os
 import asyncio
-import logging
 from datetime import datetime
 
 from loguru import logger
@@ -23,9 +22,9 @@ from loguru import logger
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 
-from connection_management import ConnectionManager
-from collection_operations import CollectionManager
-from backup_recovery import BackupManager, BackupRecoveryConfig, BackupStorageType, BackupParams
+from milvus_ops.connection_management import ConnectionManager
+from milvus_ops.collection_operations import CollectionManager
+from milvus_ops.backup_recovery import BackupManager, BackupRecoveryConfig, BackupStorageType, BackupParams
 from config import load_settings
 # Import usage_examples utils (not the project's utils package)
 import importlib.util
@@ -124,7 +123,7 @@ async def main():
             # Try to query for a few rows to check if data exists
             def _check_data(alias):
                 from pymilvus import Collection
-                from backup_recovery.utils.query import generate_query_expression
+                from milvus_ops.backup_recovery.utils.query import generate_query_expression
 
                 coll = Collection(name=COLLECTION_NAME, using=alias)
                 # Generate robust query expression that works across all Milvus versions
