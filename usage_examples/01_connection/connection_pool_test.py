@@ -11,10 +11,7 @@ import asyncio
 import time
 import threading
 
-# Add parent directory to path for imports
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
-
-from connection_management import ConnectionManager
+from milvus_ops.connection_management import ConnectionManager
 from config import load_settings
 # Import usage_examples utils (not the project's utils package)
 import importlib.util

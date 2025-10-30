@@ -18,11 +18,11 @@ The module is specifically designed for production environments handling million
 providing the scalability, robustness, and fault tolerance required for enterprise applications.
 """
 
-from .connection_manager import ConnectionManager
-from .connection_pool import MilvusConnectionPool
-from .circuit_breaker import MilvusCircuitBreaker, CircuitBreakerConfig
-from .milvus_connector import MilvusConnector, ConnectionStatus, ConnectionFeedback
-from .connection_exceptions import (
+from milvus_ops.connection_management.connection_manager import ConnectionManager
+from milvus_ops.connection_management.connection_pool import MilvusConnectionPool
+from milvus_ops.connection_management.circuit_breaker import MilvusCircuitBreaker, CircuitBreakerConfig
+from milvus_ops.connection_management.milvus_connector import MilvusConnector, ConnectionStatus, ConnectionFeedback
+from milvus_ops.connection_management.connection_exceptions import (
     ConnectionError,
     ConnectionPoolExhaustedError,
     ConnectionTimeoutError,

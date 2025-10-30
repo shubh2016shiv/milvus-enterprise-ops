@@ -15,7 +15,7 @@ from contextlib import contextmanager
 from pymilvus import connections
 
 from config import MilvusSettings
-from .connection_exceptions import (
+from milvus_ops.connection_management.connection_exceptions import (
     ConnectionPoolExhaustedError,
     ConnectionInitializationError,
     ConnectionClosedError

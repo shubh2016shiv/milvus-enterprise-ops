@@ -12,14 +12,13 @@ import random
 from typing import Optional, Callable, Any, Dict
 from functools import wraps
 from concurrent.futures import ThreadPoolExecutor
-import threading
 
 from pymilvus import connections
 
 from config import MilvusSettings, load_settings
-from connection_management.connection_pool import MilvusConnectionPool
-from connection_management.circuit_breaker import MilvusCircuitBreaker, CircuitBreakerConfig
-from connection_management.connection_exceptions import (
+from milvus_ops.connection_management.connection_pool import MilvusConnectionPool
+from milvus_ops.connection_management.circuit_breaker import MilvusCircuitBreaker, CircuitBreakerConfig
+from milvus_ops.connection_management.connection_exceptions import (
     ConnectionError,
     MaxRetriesExceededError,
     ServerUnavailableError,

@@ -8,9 +8,6 @@ environments where robust connection handling is critical.
 """
 import os
 import sys
-# Add project root to Python path
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-
 
 import uuid
 import logging
@@ -18,9 +15,9 @@ from enum import Enum
 from dataclasses import dataclass
 from typing import Optional
 
-from config import MilvusSettings, load_settings
-from connection_management.connection_manager import ConnectionManager
-from connection_management.connection_exceptions import (
+from config import MilvusSettings
+from milvus_ops.connection_management.connection_manager import ConnectionManager
+from milvus_ops.connection_management.connection_exceptions import (
     ConnectionError,
     ServerUnavailableError
 )

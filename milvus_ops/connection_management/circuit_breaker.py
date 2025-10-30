@@ -17,7 +17,7 @@ from typing import Callable, Any, TypeVar, Awaitable, Optional, Dict
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 
-from .connection_exceptions import (
+from milvus_ops.connection_management.connection_exceptions import (
     ConnectionError,
     ServerUnavailableError,
     ConnectionTimeoutError,
