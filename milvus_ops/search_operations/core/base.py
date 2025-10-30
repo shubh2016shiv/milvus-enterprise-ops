@@ -10,7 +10,7 @@ from abc import ABC, abstractmethod
 from typing import List, Dict, Any, Optional, Tuple, TypeVar, Generic
 from dataclasses import dataclass, field
 
-from connection_management import ConnectionManager
+from milvus_ops.connection_management import ConnectionManager
 from milvus_ops_exceptions import OperationTimeoutError
 from .search_ops_exceptions import (
     SearchError, 

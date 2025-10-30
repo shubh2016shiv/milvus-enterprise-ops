@@ -23,7 +23,7 @@ This module provides advanced, high-performance search capabilities for Milvus, 
 
 ```python
 from connection_management import ConnectionManager
-from search_operations import (
+from milvus_ops.search_operations import (
     SearchManager,
     SearchType,
     MetricType,
@@ -155,25 +155,27 @@ print(f"Advanced hybrid results: {results.total_hits} matches")
 ### Custom Embedding Provider
 
 ```python
-from search_operations import EmbeddingProvider, EmbeddingResult
+from milvus_ops.search_operations import EmbeddingProvider, EmbeddingResult
+
 
 class CustomEmbeddingProvider(EmbeddingProvider):
     """Custom embedding provider implementation."""
-    
+
     def __init__(self, model_name: str = "custom-model", dimension: int = 512):
         self.model_name = model_name
         self.dimension = dimension
-    
+
     async def generate_embedding(self, text: str) -> EmbeddingResult:
         # Your embedding generation logic here
         embedding_vector = await your_embedding_service.embed(text)
-        
+
         return EmbeddingResult(
             embedding=embedding_vector,
             dimension=self.dimension,
             model_name=self.model_name,
             processing_time_ms=processing_time
         )
+
 
 # Use custom provider
 custom_provider = CustomEmbeddingProvider(dimension=512)
@@ -231,7 +233,7 @@ print(f"Filtered results: {results.total_hits} matches")
 ## Error Handling
 
 ```python
-from search_operations.core.search_ops_exceptions import (
+from milvus_ops.search_operations import (
     SearchError,
     InvalidSearchParametersError,
     EmbeddingGenerationError,

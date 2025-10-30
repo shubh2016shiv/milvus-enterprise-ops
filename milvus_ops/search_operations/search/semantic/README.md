@@ -31,8 +31,9 @@ Core semantic search implementation that orchestrates all other components.
 - Batch search support
 
 **Usage:**
+
 ```python
-from search_operations.search.semantic import SemanticSearch
+from milvus_ops.search_operations.search.semantic import SemanticSearch
 
 search = SemanticSearch(
     connection_manager=conn_manager,
@@ -129,8 +130,8 @@ Intelligent query optimization for better performance.
 ### Basic Search
 
 ```python
-from search_operations.search.semantic import SemanticSearch
-from search_operations.config.semantic import SemanticSearchConfig
+from milvus_ops.search_operations.search.semantic import SemanticSearch
+from milvus_ops.search_operations import SemanticSearchConfig
 
 # Initialize search engine
 search = SemanticSearch(
@@ -156,7 +157,7 @@ result = await search.search(
 ### Search with Resilience Configuration
 
 ```python
-from search_operations.search.semantic import SemanticSearch, RetryConfig
+from milvus_ops.search_operations.search.semantic import SemanticSearch, RetryConfig
 
 # Custom retry configuration
 retry_config = RetryConfig(
@@ -322,7 +323,7 @@ results = await search.batch_search(
 The module provides specific exceptions for different failure scenarios:
 
 ```python
-from search_operations.core.search_ops_exceptions import (
+from milvus_ops.search_operations import (
     SearchError,
     InvalidSearchParametersError,
     SearchTimeoutError

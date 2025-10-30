@@ -5,11 +5,10 @@ This module provides a unified interface for all search operations,
 allowing for easy switching between different search types and configurations.
 """
 
-import time
 import logging
-from typing import List, Dict, Any, Optional, Union
+from typing import Dict, Any, Union
 
-from connection_management import ConnectionManager
+from milvus_ops.connection_management import ConnectionManager
 from .search_ops_exceptions import SearchError, InvalidSearchParametersError
 from ..config.base import SearchType, ReRankingMethod
 from ..config.semantic import SemanticSearchConfig
