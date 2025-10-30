@@ -7,10 +7,9 @@ error handling, and progress monitoring in a production-like scenario.
 
 import asyncio
 import logging
-from typing import List
 
-from connection_management import ConnectionManager
-from collection_operations import CollectionManager, CollectionSchema, FieldSchema, DataType, MetricType
+from milvus_ops.connection_management import ConnectionManager
+from milvus_ops.collection_operations import CollectionManager, MetricType
 from config import MilvusSettings
 
 # Import from the module (using the public API)

@@ -25,11 +25,10 @@ Typical usage:
 """
 
 import logging
-import time
-from typing import Dict, Any, Optional, List, Tuple
+from typing import Dict, Optional, List, Tuple
 from datetime import datetime, timedelta
 
-from index_operations.models.entities import IndexState, IndexBuildProgress
+from milvus_ops.index_operations.models.entities import IndexState, IndexBuildProgress
 
 logger = logging.getLogger(__name__)
 

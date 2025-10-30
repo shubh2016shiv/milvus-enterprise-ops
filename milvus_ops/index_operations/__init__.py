@@ -69,7 +69,7 @@ from .models.parameters import (
     create_index_params,
     get_default_params
 )
-from collection_operations.schema import IndexType, MetricType
+from milvus_ops.collection_operations import IndexType, MetricType
 
 # Validation
 from .core.validator import IndexValidator

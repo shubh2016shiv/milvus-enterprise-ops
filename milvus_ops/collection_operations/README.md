@@ -27,7 +27,9 @@ pip install milvus-ops
 ```python
 import asyncio
 from connection_management import ConnectionManager
-from collection_operations import CollectionManager, CollectionSchema, FieldSchema, DataType
+from milvus_ops.collection_operations import CollectionManager, CollectionSchema, FieldSchema, DataType
+
+
 # Ensure all necessary imports are correctly listed and explained
 
 async def main():
@@ -74,6 +76,7 @@ async def main():
     )
 
     print("Collection created and loaded successfully!")
+
 
 if __name__ == "__main__":
     asyncio.run(main())
@@ -247,7 +250,7 @@ else:
 The module supports all Milvus data types:
 
 ```python
-from collection_operations import DataType
+from milvus_ops.collection_operations import DataType
 
 # Numeric types
 INT64 = DataType.INT64
@@ -258,8 +261,8 @@ DOUBLE = DataType.DOUBLE
 VARCHAR = DataType.VARCHAR  # Requires max_length
 
 # Vector types
-FLOAT_VECTOR = DataType.FLOAT_VECTOR      # Requires dim
-BINARY_VECTOR = DataType.BINARY_VECTOR    # Requires dim
+FLOAT_VECTOR = DataType.FLOAT_VECTOR  # Requires dim
+BINARY_VECTOR = DataType.BINARY_VECTOR  # Requires dim
 SPARSE_FLOAT_VECTOR = DataType.SPARSE_FLOAT_VECTOR  # Requires dim
 
 # Other types
@@ -334,7 +337,7 @@ schema = CollectionSchema(
 Schemas are validated before collection creation:
 
 ```python
-from collection_operations import SchemaValidator
+from milvus_ops.collection_operations import SchemaValidator
 
 # Validate schema
 is_valid, errors = await SchemaValidator.validate_schema(schema)
@@ -394,7 +397,7 @@ await collection_manager.load_collection(
 The module provides comprehensive error handling with specific exception types:
 
 ```python
-from collection_operations import (
+from milvus_ops.collection_operations import (
     CollectionError,
     CollectionNotFoundError,
     SchemaError

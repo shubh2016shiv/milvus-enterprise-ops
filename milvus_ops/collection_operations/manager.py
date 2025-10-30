@@ -8,7 +8,7 @@ managing Milvus collections in a robust and scalable manner.
 import asyncio
 import logging
 import time
-from typing import Dict, List, Optional, Tuple, Union, Any, Set, Coroutine
+from typing import Dict, List, Optional, Union, Any
 from datetime import datetime
 
 from pymilvus.exceptions import (
@@ -16,7 +16,7 @@ from pymilvus.exceptions import (
     SchemaNotReadyException  # Used for schema validation errors and collection not found
 )
 
-from connection_management import ConnectionManager
+from milvus_ops.connection_management import ConnectionManager
 from milvus_ops_exceptions import (
     CollectionError, 
     CollectionNotFoundError, 

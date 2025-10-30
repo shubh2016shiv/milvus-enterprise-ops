@@ -20,11 +20,10 @@ Typical usage:
     )
 """
 
-from enum import Enum
-from typing import Dict, Any, Optional, Union, ClassVar, Type, List, cast
-from pydantic import BaseModel, Field, validator, field_validator, model_validator
+from typing import Dict, Any, Union, ClassVar, Type
+from pydantic import BaseModel, Field, validator, model_validator
 
-from collection_operations.schema import IndexType, MetricType
+from milvus_ops.collection_operations import IndexType
 
 
 class IndexParams(BaseModel):

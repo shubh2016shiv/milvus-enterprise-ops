@@ -19,11 +19,11 @@ Typical usage:
 """
 
 import logging
-from typing import Dict, Any, Optional, Union, List, Tuple, Set
+from typing import Dict, Any, Optional, Union, Set
 import math
 
-from collection_operations.schema import IndexType, MetricType, FieldSchema, DataType
-from index_operations.models.parameters import (
+from milvus_ops.collection_operations import IndexType, MetricType, DataType
+from milvus_ops.index_operations.models.parameters import (
     IndexParams,
     IvfFlatParams,
     IvfSQ8Params,
@@ -32,7 +32,7 @@ from index_operations.models.parameters import (
     ANNOYParams,
     create_index_params
 )
-from index_operations.index_ops_exceptions import IndexParameterError, IndexTypeError
+from milvus_ops.index_operations.index_ops_exceptions import IndexParameterError, IndexTypeError
 
 logger = logging.getLogger(__name__)
 

@@ -5,17 +5,13 @@ Demonstrates how to create a Milvus collection with a schema including
 vector fields and metadata fields.
 """
 
-import sys
 import os
 import asyncio
 
-# Add parent directory to path for imports
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
-
-from connection_management import ConnectionManager
-from collection_operations import CollectionManager, CollectionSchema, FieldSchema, DataType
-from index_operations import IndexManager, IndexType, MetricType
-from index_operations.models.parameters import IvfFlatParams
+from milvus_ops.connection_management import ConnectionManager
+from milvus_ops.collection_operations import CollectionManager, CollectionSchema, FieldSchema, DataType
+from milvus_ops.index_operations import IndexManager, IndexType, MetricType
+from milvus_ops.index_operations.models.parameters import IvfFlatParams
 from config import load_settings
 # Import usage_examples utils (not the project's utils package)
 import importlib.util

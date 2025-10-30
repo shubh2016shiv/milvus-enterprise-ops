@@ -17,9 +17,9 @@ Implements best practices for collection management in production environments
 with proper error handling and validation.
 """
 
-from .manager import CollectionManager
-from .schema import CollectionSchema, FieldSchema, DataType, IndexType, MetricType
-from .entities import (
+from milvus_ops.collection_operations.manager import CollectionManager
+from milvus_ops.collection_operations.schema import CollectionSchema, FieldSchema, DataType, IndexType, MetricType
+from milvus_ops.collection_operations.entities import (
     CollectionDescription, 
     CollectionStats, 
     LoadProgress, 

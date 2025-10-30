@@ -28,45 +28,37 @@ Typical usage from external projects:
 import asyncio
 import logging
 import time
-from typing import Dict, List, Any, Optional, Union, Tuple
+from typing import Dict, List, Any, Optional, Union
 
 from pymilvus import Collection
 from pymilvus.exceptions import MilvusException
 
 from milvus_ops_exceptions import (
     CollectionNotFoundError as BaseCollectionNotFoundError,
-    OperationTimeoutError,
-    ConnectionError,
-    SchemaError
+    ConnectionError
 )
-from collection_operations.schema import IndexType, MetricType, DataType, FieldSchema, CollectionSchema
-from connection_management import ConnectionManager
-from collection_operations import CollectionManager as OpsCollectionManager
-from index_operations.config import IndexOperationConfig
-from index_operations.index_ops_exceptions import (
+from milvus_ops.collection_operations import IndexType, MetricType, DataType, CollectionSchema
+from milvus_ops.connection_management import ConnectionManager
+from milvus_ops.collection_operations import CollectionManager as OpsCollectionManager
+from milvus_ops.index_operations.config import IndexOperationConfig
+from milvus_ops.index_operations.index_ops_exceptions import (
     IndexOperationError,
     IndexBuildError,
     IndexNotFoundError,
     IndexParameterError,
-    IndexTypeError,
-    IndexBuildInProgressError,
-    IndexResourceError,
     IndexTimeoutError
 )
-from index_operations.models.entities import (
+from milvus_ops.index_operations.models.entities import (
     IndexState,
     IndexDescription,
     IndexBuildProgress,
-    IndexStats,
     IndexResult
 )
-from index_operations.models.parameters import (
-    IndexParams,
-    create_index_params,
-    get_default_params
+from milvus_ops.index_operations.models.parameters import (
+    IndexParams
 )
-from index_operations.core.validator import IndexValidator
-from index_operations.utils.progress import IndexBuildTracker, get_registry
+from milvus_ops.index_operations.core.validator import IndexValidator
+from milvus_ops.index_operations.utils.progress import get_registry
 
 logger = logging.getLogger(__name__)
 
