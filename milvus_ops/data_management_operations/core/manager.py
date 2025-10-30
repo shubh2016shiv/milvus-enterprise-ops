@@ -25,8 +25,7 @@ Typical usage from external projects:
 
 import asyncio
 import logging
-import time
-from typing import Dict, List, Any, Optional, Union, Tuple, Set, TypeVar, Generic
+from typing import Dict, List, Any, Optional, Union, TypeVar, Generic
 import math
 
 from pymilvus.exceptions import MilvusException
@@ -44,23 +43,20 @@ from milvus_ops_exceptions import (
     ConnectionError,
     SchemaError
 )
-from data_management_operations.data_ops_exceptions import (
+from milvus_ops.data_management_operations.data_ops_exceptions import (
     InsertionError,
-    DataOperationError,
-    BatchPartialFailureError,
     TransientOperationError,
     SchemaValidationError,
-    DocumentPreparationError,
     CollectionOperationError,
     DeleteOperationError
 )
-from data_management_operations.data_ops_config import DataOperationConfig
-from connection_management import ConnectionManager
-from collection_operations import CollectionManager, CollectionSchema
-from data_management_operations.models.entities import Document, DocumentBase, BatchOperationResult, DeleteResult, OperationStatus
-from data_management_operations.core.validator import DataValidator
-from data_management_operations.utils.timing import PerformanceTimer, TimingResult, BatchTimingResult, time_operation
-from data_management_operations.utils.retry import retry_on_transient_error, is_transient_milvus_error
+from milvus_ops.data_management_operations.data_ops_config import DataOperationConfig
+from milvus_ops.connection_management import ConnectionManager
+from milvus_ops.collection_operations import CollectionManager, CollectionSchema
+from milvus_ops.data_management_operations.models.entities import DocumentBase, BatchOperationResult, DeleteResult, OperationStatus
+from milvus_ops.data_management_operations.core.validator import DataValidator
+from milvus_ops.data_management_operations.utils.timing import PerformanceTimer, TimingResult, BatchTimingResult
+from milvus_ops.data_management_operations.utils.retry import is_transient_milvus_error
 
 logger = logging.getLogger(__name__)
 

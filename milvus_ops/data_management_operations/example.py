@@ -20,18 +20,15 @@ if parent_dir not in sys.path:
     sys.path.insert(0, parent_dir)
 
 # Now import after path is fixed
-from connection_management import ConnectionManager
-from collection_operations import CollectionManager, CollectionSchema, FieldSchema, DataType, MetricType
+from milvus_ops.connection_management import ConnectionManager
+from milvus_ops.collection_operations import CollectionManager, CollectionSchema, FieldSchema, DataType
 from config import MilvusSettings
 
 # Import from the module (using the public API)
-from data_management_operations import (
+from milvus_ops.data_management_operations import (
     DataManager,
     DataOperationConfig,
     Document,
-    BatchOperationResult,
-    DeleteResult,
-    OperationStatus,
     BatchPartialFailureError,
     SchemaValidationError,
     CollectionOperationError

@@ -11,8 +11,8 @@ import logging
 from typing import Callable, Any, TypeVar, Awaitable
 from functools import wraps
 
-from ..data_ops_exceptions import TransientOperationError
-from ..data_ops_config import DataOperationConfig
+from milvus_ops.data_management_operations.data_ops_exceptions import TransientOperationError
+from milvus_ops.data_management_operations.data_ops_config import DataOperationConfig
 
 logger = logging.getLogger(__name__)
 

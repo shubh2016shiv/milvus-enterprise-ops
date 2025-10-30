@@ -19,11 +19,10 @@ Typical usage from external projects:
 """
 
 import logging
-from typing import Dict, List, Any, Optional, Union, Tuple, Callable
-import numpy as np
+from typing import Dict, List, Any, Union
 
-from collection_operations import CollectionSchema, FieldSchema, DataType
-from data_management_operations.models.entities import Document, DocumentBase, DataValidationResult
+from milvus_ops.collection_operations import CollectionSchema, DataType
+from milvus_ops.data_management_operations.models.entities import DocumentBase, DataValidationResult
 
 logger = logging.getLogger(__name__)
 

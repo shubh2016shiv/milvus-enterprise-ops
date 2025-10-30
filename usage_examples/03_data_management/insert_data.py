@@ -9,13 +9,11 @@ import sys
 import os
 import asyncio
 
-# Add parent directory to path for imports
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 
-from data_management_operations.models.entities import OperationStatus
-from connection_management import ConnectionManager
-from collection_operations import CollectionManager
-from data_management_operations import DataManager, DataOperationConfig
+from milvus_ops.data_management_operations.models.entities import OperationStatus
+from milvus_ops.connection_management import ConnectionManager
+from milvus_ops.collection_operations import CollectionManager
+from milvus_ops.data_management_operations import DataManager, DataOperationConfig
 from config import load_settings
 # Import usage_examples utils (not the project's utils package)
 import importlib.util
