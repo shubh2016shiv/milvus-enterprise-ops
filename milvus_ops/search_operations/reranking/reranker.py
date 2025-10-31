@@ -758,6 +758,138 @@ class MilvusReRanker:
             self._metrics_history.clear()
         logger.info("Re-ranking metrics cleared")
 
+    async def rerank(
+        self,
+        search_result: SearchResult,
+        rerank_method: ReRankingMethod,
+        rerank_weights: list[float] | None = None,
+        rerank_k: int | None = None,
+    ) -> SearchResult:
+        """
+        Re-rank search results using the specified method.
+
+        This method provides a simple interface for re-ranking search results.
+        It handles method selection, ranker creation, error handling, and
+        result conversion.
+
+        Args:
+            search_result: Original search results to re-rank
+            rerank_method: Re-ranking method to use
+            rerank_weights: Weights for weighted re-ranking (required for WEIGHTED method)
+            rerank_k: RRF constant for RRF re-ranking (optional, defaults to 60)
+
+        Returns:
+            Re-ranked SearchResult
+
+        Raises:
+            ReRankingError: If re-ranking fails and fallback is disabled
+        """
+        # If method is NONE, return original result unchanged
+        if rerank_method == ReRankingMethod.NONE:
+            logger.debug("Re-ranking method is NONE, returning original results")
+            return search_result
+
+        # Validate input
+        if not search_result or not search_result.hits:
+            logger.warning("No hits in search result, returning original result")
+            return search_result
+
+        original_result = search_result
+
+        try:
+            # Create re-ranking config
+            params: dict[str, Any] = {}
+            if rerank_method == ReRankingMethod.WEIGHTED:
+                if not rerank_weights:
+                    raise InvalidSearchParametersError(
+                        "rerank_weights must be provided for WEIGHTED method"
+                    )
+                params["weights"] = rerank_weights
+            elif rerank_method == ReRankingMethod.RRF:
+                params["k"] = rerank_k or self.DEFAULT_RRF_K
+
+            config = ReRankingConfig(
+                enabled=True,
+                method=rerank_method,
+                params=params,
+            )
+
+            # Create or use existing ranker
+            # Tests may set _ranker directly, so check if it exists
+            if self._ranker is None:
+                # Temporarily set method to match rerank_method for ranker creation
+                original_method = self.method
+                try:
+                    if rerank_method == ReRankingMethod.WEIGHTED:
+                        self.method = MilvusReRankingMethod.WEIGHTED
+                        self._ranker = self.create_ranker(weights=rerank_weights)
+                    elif rerank_method == ReRankingMethod.RRF:
+                        self.method = MilvusReRankingMethod.RRF
+                        self._ranker = self.create_ranker(k=rerank_k or self.DEFAULT_RRF_K)
+                finally:
+                    # Restore original method
+                    self.method = original_method
+
+            # Perform re-ranking
+            if not self._ranker:
+                raise ReRankingError("Failed to create ranker instance")
+
+            # Call the ranker's rerank method
+            # The ranker expects the hits as input
+            reranked_hits = await self._ranker.rerank(search_result.hits)
+
+            # Convert reranked results back to SearchResult format
+            # Map the reranked hits back to original format, preserving metadata
+            result_hits = []
+            for reranked_hit in reranked_hits:
+                # Find corresponding original hit by ID
+                hit_id = reranked_hit.get("id")
+                original_hit = None
+                for hit in search_result.hits:
+                    if str(hit.get("id")) == str(hit_id):
+                        original_hit = hit.copy()
+                        break
+
+                # If we found the original hit, merge with reranked data
+                if original_hit:
+                    original_hit.update(reranked_hit)
+                    # Ensure distance/score is updated if present in reranked_hit
+                    if "score" in reranked_hit:
+                        original_hit["distance"] = reranked_hit["score"]
+                    result_hits.append(original_hit)
+                else:
+                    # If not found, use reranked hit as-is
+                    if "score" in reranked_hit:
+                        reranked_hit["distance"] = reranked_hit.pop("score")
+                    result_hits.append(reranked_hit)
+
+            # Create result SearchResult
+            reranked_result = SearchResult(
+                hits=result_hits,
+                total_hits=len(result_hits),
+                took_ms=search_result.took_ms,
+                search_params=search_result.search_params.copy()
+                if search_result.search_params
+                else {},
+            )
+
+            # Process results to add metadata
+            return await self.process_results(
+                results=reranked_result,
+                config=config,
+                original_results=original_result,
+            )
+
+        except Exception as e:
+            error_msg = f"Re-ranking failed: {str(e)}"
+            logger.error(error_msg, exc_info=True)
+
+            if self.fallback_on_error:
+                logger.warning("Falling back to original results due to error")
+                return original_result
+            else:
+                raise ReRankingError(error_msg) from e
+
     @asynccontextmanager
     async def reranking_context(self, config: ReRankingConfig):
         """

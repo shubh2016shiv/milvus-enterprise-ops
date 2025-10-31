@@ -216,18 +216,6 @@ def mock_load_settings(mock_milvus_settings: MilvusSettings) -> Generator[MagicM
 
 
 @pytest.fixture
-def event_loop():
-    """
-    Create an event loop for async tests.
-
-    Coverage: Ensures proper async test execution and cleanup.
-    """
-    loop = asyncio.new_event_loop()
-    yield loop
-    loop.close()
-
-
-@pytest.fixture
 def async_mock_operation() -> Callable[[Any], AsyncMock]:
     """
     Factory for creating async mock operations.
@@ -1732,6 +1720,237 @@ def cleanup_singletons():
     with MilvusConnectionPool._lock:
         MilvusConnectionPool._instance = None
         MilvusConnectionPool._lock = type(MilvusConnectionPool._lock)()
+
+
+# ============================================================================
+# Search Operations Fixtures
+# ============================================================================
+
+
+@pytest.fixture
+def mock_embedding_provider():
+    """
+    Create a mock EmbeddingProvider for testing.
+
+    Coverage: EmbeddingProvider mocking for search operation tests.
+    """
+    from unittest.mock import AsyncMock, MagicMock
+
+    from milvus_ops.search_operations.providers.embedding import (
+        EmbeddingProvider,
+        EmbeddingResult,
+    )
+
+    mock_provider = MagicMock(spec=EmbeddingProvider)
+
+    # Mock generate_embedding for single text
+    async def _generate_embedding(text: str) -> EmbeddingResult:
+        # Create a simple mock embedding vector
+        embedding = [0.1] * 128  # 128-dimensional vector
+        return EmbeddingResult(
+            embedding=embedding,
+            dimension=128,
+            model_name="test_model",
+            processing_time_ms=10.0,
+            is_batch=False,
+        )
+
+    # Mock generate_embeddings for batch
+    async def _generate_embeddings(texts: list[str]) -> EmbeddingResult:
+        embeddings = [[0.1] * 128 for _ in texts]
+        return EmbeddingResult(
+            embedding=embeddings if len(texts) > 1 else embeddings[0],
+            dimension=128,
+            model_name="test_model",
+            processing_time_ms=20.0,
+            is_batch=len(texts) > 1,
+        )
+
+    mock_provider.generate_embedding = AsyncMock(side_effect=_generate_embedding)
+    mock_provider.generate_embeddings = AsyncMock(side_effect=_generate_embeddings)
+    mock_provider.get_dimension = MagicMock(return_value=128)
+    mock_provider.get_model_name = MagicMock(return_value="test_model")
+
+    return mock_provider
+
+
+@pytest.fixture
+def sample_search_results():
+    """
+    Create sample search result data for testing.
+
+    Coverage: Search result data structures for testing.
+    """
+    return [
+        {
+            "id": 1,
+            "distance": 0.1,
+            "score": 0.9,
+            "text": "First result",
+            "metadata": {"category": "test"},
+        },
+        {
+            "id": 2,
+            "distance": 0.2,
+            "score": 0.8,
+            "text": "Second result",
+            "metadata": {"category": "test"},
+        },
+        {
+            "id": 3,
+            "distance": 0.3,
+            "score": 0.7,
+            "text": "Third result",
+            "metadata": {"category": "test"},
+        },
+    ]
+
+
+@pytest.fixture
+def sample_search_configs():
+    """
+    Create sample search configurations for testing.
+
+    Coverage: Search configuration objects for various test scenarios.
+    """
+    from milvus_ops.search_operations.config.base import MetricType
+    from milvus_ops.search_operations.config.hybrid import HybridSearchConfig
+    from milvus_ops.search_operations.config.semantic import SemanticSearchConfig
+
+    return {
+        "semantic_default": SemanticSearchConfig(
+            top_k=10,
+            timeout=30.0,
+            metric_type=MetricType.COSINE,
+            search_field="vector",
+        ),
+        "semantic_custom": SemanticSearchConfig(
+            top_k=20,
+            timeout=60.0,
+            metric_type=MetricType.L2,
+            search_field="embedding",
+            expr='category == "test"',
+        ),
+        "hybrid_default": HybridSearchConfig(
+            top_k=10,
+            timeout=30.0,
+            metric_type=MetricType.COSINE,
+            vector_field="vector",
+            sparse_field="sparse_vector",
+            vector_weight=0.7,
+            sparse_weight=0.3,
+        ),
+        "hybrid_vector_only": HybridSearchConfig(
+            top_k=10,
+            timeout=30.0,
+            metric_type=MetricType.COSINE,
+            vector_field="vector",
+            vector_weight=1.0,
+            sparse_weight=0.0,
+        ),
+    }
+
+
+@pytest.fixture
+def sample_queries():
+    """
+    Create sample queries for testing, including edge cases.
+
+    Coverage: Query strings for normal, edge case, and malicious input testing.
+    """
+    return {
+        "normal": "What is machine learning?",
+        "short": "AI",
+        "long": "This is a very long query " * 100,
+        "empty": "",
+        "special_chars": "test@#$%^&*()query",
+        "unicode": "测试查询 🚀",
+        "sql_injection": "'; DROP TABLE users; --",
+        "xss": "<script>alert('xss')</script>",
+        "whitespace": "   query   with   spaces   ",
+        "numbers": "123456789",
+    }
+
+
+@pytest.fixture
+def sample_sparse_vectors():
+    """
+    Create sample BM25 sparse vector examples for testing.
+
+    Coverage: Sparse vector data structures for BM25 testing.
+    """
+    return [
+        {
+            "indices": [1, 5, 10, 15, 20],
+            "values": [0.5, 0.8, 0.3, 0.7, 0.4],
+        },
+        {
+            "indices": [2, 6, 11, 16, 21],
+            "values": [0.6, 0.9, 0.2, 0.8, 0.5],
+        },
+    ]
+
+
+@pytest.fixture
+def mock_pymilvus_search_result():
+    """
+    Create a mock PyMilvus search result for testing.
+
+    Coverage: PyMilvus search result structure mocking.
+    """
+    from unittest.mock import MagicMock
+
+    # Create mock hit objects
+    hit1 = MagicMock()
+    hit1.id = 1
+    hit1.distance = 0.1
+    hit1.score = 0.9
+    hit1.entity = {"text": "First result", "category": "test"}
+
+    hit2 = MagicMock()
+    hit2.id = 2
+    hit2.distance = 0.2
+    hit2.score = 0.8
+    hit2.entity = {"text": "Second result", "category": "test"}
+
+    hit3 = MagicMock()
+    hit3.id = 3
+    hit3.distance = 0.3
+    hit3.score = 0.7
+    hit3.entity = {"text": "Third result", "category": "test"}
+
+    # Create mock search result (list of hit lists)
+    search_result = [[hit1, hit2, hit3]]
+
+    return search_result
+
+
+@pytest.fixture
+def sample_reranking_configs():
+    """
+    Create sample reranking configurations for testing.
+
+    Coverage: Reranking configuration objects for various test scenarios.
+    """
+    from milvus_ops.search_operations.config.base import ReRankingMethod
+    from milvus_ops.search_operations.config.reranking import ReRankingConfig
+
+    return {
+        "weighted": ReRankingConfig(
+            enabled=True,
+            method=ReRankingMethod.WEIGHTED,
+            params={"weights": [0.6, 0.4]},
+        ),
+        "rrf": ReRankingConfig(
+            enabled=True,
+            method=ReRankingMethod.RRF,
+            params={"k": 60},
+        ),
+        "disabled": ReRankingConfig(
+            enabled=False,
+            method=ReRankingMethod.NONE,
+        ),
+    }
 
 
 # ============================================================================
