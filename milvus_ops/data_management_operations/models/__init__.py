@@ -5,20 +5,19 @@ Contains Pydantic models for documents and operation results.
 """
 
 from .entities import (
+    BatchOperationResult,
+    DataValidationResult,
+    DeleteResult,
     Document,
     DocumentBase,
-    BatchOperationResult,
-    DeleteResult,
-    DataValidationResult,
-    OperationStatus
+    OperationStatus,
 )
 
 __all__ = [
-    'Document',
-    'DocumentBase',
-    'BatchOperationResult',
-    'DeleteResult',
-    'DataValidationResult',
-    'OperationStatus'
+    "Document",
+    "DocumentBase",
+    "BatchOperationResult",
+    "DeleteResult",
+    "DataValidationResult",
+    "OperationStatus",
 ]
-

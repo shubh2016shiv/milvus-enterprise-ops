@@ -23,17 +23,17 @@ Typical usage from external projects:
         Document,
         BatchPartialFailureError
     )
-    
+
     # Create custom configuration
     config = DataOperationConfig(
         default_batch_size=500,
         retry_transient_errors=True,
         default_operation_timeout=60.0
     )
-    
+
     # Initialize manager with configuration
     manager = DataManager(connection_mgr, collection_mgr, config=config)
-    
+
     # Insert documents with error handling
     try:
         result = await manager.insert_documents(
@@ -51,66 +51,66 @@ Typical usage from external projects:
 # Core manager (primary interface)
 from .core.manager import DataManager
 
-# Configuration
-from .data_ops_config import DataOperationConfig
-
-# Data models
-from .models.entities import (
-    Document,
-    DocumentBase,
-    BatchOperationResult,
-    DeleteResult,
-    DataValidationResult,
-    OperationStatus
-)
-
 # Validation
 from .core.validator import DataValidator
 
-# Timing utilities
-from .utils.timing import (
-    PerformanceTimer,
-    TimingResult,
-    BatchTimingResult,
-    time_operation
-)
+# Configuration
+from .data_ops_config import DataOperationConfig
 
 # Exceptions
 from .data_ops_exceptions import (
-    DataOperationError,
     BatchPartialFailureError,
-    TransientOperationError,
-    SchemaValidationError,
-    DocumentPreparationError,
     CollectionOperationError,
+    DataOperationError,
     DeleteOperationError,
-    InsertionError  # For backward compatibility
+    DocumentPreparationError,
+    InsertionError,  # For backward compatibility
+    SchemaValidationError,
+    TransientOperationError,
+)
+
+# Data models
+from .models.entities import (
+    BatchOperationResult,
+    DataValidationResult,
+    DeleteResult,
+    Document,
+    DocumentBase,
+    OperationStatus,
+)
+
+# Timing utilities
+from .utils.timing import (
+    BatchTimingResult,
+    PerformanceTimer,
+    TimingResult,
+    time_operation,
 )
 
 __all__ = [
     # Primary interface
-    'DataManager',
-    'DataOperationConfig',
+    "DataManager",
+    "DataOperationConfig",
     # Models
-    'Document',
-    'DocumentBase',
-    'BatchOperationResult',
-    'DeleteResult',
-    'DataValidationResult',
-    'OperationStatus',
+    "Document",
+    "DocumentBase",
+    "BatchOperationResult",
+    "DeleteResult",
+    "DataValidationResult",
+    "OperationStatus",
     # Utilities
-    'DataValidator',
-    'PerformanceTimer',
-    'TimingResult',
-    'BatchTimingResult',
-    'time_operation',
+    "DataValidator",
+    "PerformanceTimer",
+    "TimingResult",
+    "BatchTimingResult",
+    "time_operation",
     # Exceptions
-    'DataOperationError',
-    'BatchPartialFailureError',
-    'TransientOperationError',
-    'SchemaValidationError',
-    'DocumentPreparationError',
-    'CollectionOperationError',
-    'DeleteOperationError',
-    'InsertionError'
+    "DataOperationError",
+    "BatchPartialFailureError",
+    "TransientOperationError",
+    "SchemaValidationError",
+    "DocumentPreparationError",
+    "CollectionOperationError",
+    "DeleteOperationError",
+    "InsertionError",
 ]
