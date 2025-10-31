@@ -5,19 +5,18 @@ This module provides a thread-safe connection pool for Milvus,
 designed to handle high-volume concurrent access efficiently.
 """
 
+from contextlib import contextmanager, suppress
 import logging
-import threading
 import queue
-from typing import Optional
-from contextlib import contextmanager
-
-from pymilvus import connections
+import threading
 
 from config import MilvusSettings
+from pymilvus import connections
+
 from milvus_ops.connection_management.connection_exceptions import (
-    ConnectionPoolExhaustedError,
+    ConnectionClosedError,
     ConnectionInitializationError,
-    ConnectionClosedError
+    ConnectionPoolExhaustedError,
 )
 
 # Logger setup
@@ -42,16 +41,17 @@ class MilvusConnectionPool:
     - Proper resource cleanup prevents connection leaks
     - Reference counting ensures pool stays alive while clients are using it
     """
+
     _instance = None
     _lock = threading.RLock()
-    
+
     def __new__(cls, *args, **kwargs):
         with cls._lock:
             if cls._instance is None:
-                cls._instance = super(MilvusConnectionPool, cls).__new__(cls)
+                cls._instance = super().__new__(cls)
                 cls._instance._initialized = False
             return cls._instance
-    
+
     def __init__(self, config: MilvusSettings = None):
         """
         Initialize the connection pool (if not already initialized).
@@ -72,31 +72,40 @@ class MilvusConnectionPool:
             if self._initialized:
                 if config is not None and config != self.config:
                     # Import from root exceptions using absolute path
-                    import sys
                     import os
-                    root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+                    import sys
+
+                    root_dir = os.path.dirname(
+                        os.path.dirname(os.path.abspath(__file__))
+                    )
                     if root_dir not in sys.path:
                         sys.path.insert(0, root_dir)
                     from milvus_ops.milvus_ops_exceptions import ConfigurationError
+
                     raise ConfigurationError(
                         "MilvusConnectionPool already initialized with a different configuration. "
                         "This could lead to inconsistent connection behavior."
                     )
                 return
-                
+
             self.config = config
             self._available_connections = queue.Queue()
             self._in_use_connections = set()
             self._initialized = True
             self._closed = False
             self._connection_count = 0
-            self._reference_count = 0  # Track how many ConnectionManagers are using this pool
-            
+            self._reference_count = (
+                0  # Track how many ConnectionManagers are using this pool
+            )
+
             # Initialize the pool
             self._initialize_pool()
-            
-            logger.info(f"Milvus connection pool initialized with size {self.config.connection.connection_pool_size}")
-    
+
+            logger.info(
+                f"Milvus connection pool initialized with size "
+                f"{self.config.connection.connection_pool_size}"
+            )
+
     def _initialize_pool(self):
         """
         Initialize the connection pool with the configured number of connections.
@@ -121,7 +130,9 @@ class MilvusConnectionPool:
                 self._connection_count += 1
         except Exception as e:
             logger.error(f"Failed to initialize connection pool: {e}")
-            raise ConnectionInitializationError(f"Failed to initialize connection pool: {e}")
+            raise ConnectionInitializationError(
+                f"Failed to initialize connection pool: {e}"
+            ) from e
 
     def _create_connection(self, alias: str):
         """
@@ -147,7 +158,7 @@ class MilvusConnectionPool:
             user=self.config.connection.user,
             password=self.config.connection.password,
             secure=self.config.connection.secure,
-            timeout=self.config.connection.timeout
+            timeout=self.config.connection.timeout,
         )
         logger.debug(f"Created new Milvus connection: {alias}")
 
@@ -175,7 +186,7 @@ class MilvusConnectionPool:
             return False
 
     @contextmanager
-    def get_connection(self, timeout: Optional[float] = None):
+    def get_connection(self, timeout: float | None = None):
         """
         Get a connection from the pool as a context manager.
 
@@ -209,17 +220,19 @@ class MilvusConnectionPool:
         """
         if self._closed:
             raise ConnectionClosedError("Connection pool is closed")
-            
+
         if timeout is None:
             timeout = self.config.connection.timeout
-            
+
         try:
             # Try to get a connection from the pool
             conn_alias = self._available_connections.get(timeout=timeout)
-            
+
             # Check if connection is healthy
             if not self._is_connection_healthy(conn_alias):
-                logger.warning(f"Stale connection {conn_alias} detected, attempting to reconnect.")
+                logger.warning(
+                    f"Stale connection {conn_alias} detected, attempting to reconnect."
+                )
                 try:
                     connections.disconnect(alias=conn_alias)
                     self._create_connection(conn_alias)
@@ -227,13 +240,19 @@ class MilvusConnectionPool:
                     logger.error(f"Failed to recreate connection {conn_alias}: {e}")
                     # Put it back and let another thread try
                     self._available_connections.put(conn_alias)
-                    raise ConnectionError(f"Failed to restore connection {conn_alias}")
+                    raise ConnectionError(
+                        f"Failed to restore connection {conn_alias}"
+                    ) from e
 
             with self._lock:
                 self._in_use_connections.add(conn_alias)
-                
-            logger.info(f"Connection {conn_alias} acquired from pool. In-use connections: {len(self._in_use_connections)}, Available: {self._available_connections.qsize()}")
-                
+
+            logger.info(
+                f"Connection {conn_alias} acquired from pool. "
+                f"In-use connections: {len(self._in_use_connections)}, "
+                f"Available: {self._available_connections.qsize()}"
+            )
+
             try:
                 # Yield the connection to the caller
                 yield conn_alias
@@ -242,7 +261,7 @@ class MilvusConnectionPool:
                 with self._lock:
                     if conn_alias in self._in_use_connections:
                         self._in_use_connections.remove(conn_alias)
-                        
+
                 if not self._closed:
                     # PRODUCTION FIX: Validate connection health before returning to pool
                     # This prevents unhealthy connections from accumulating in the pool,
@@ -252,92 +271,113 @@ class MilvusConnectionPool:
                     if self._is_connection_healthy(conn_alias):
                         # Connection is healthy, return it to the pool
                         self._available_connections.put(conn_alias)
-                        logger.info(f"Connection {conn_alias} returned to pool. In-use connections: {len(self._in_use_connections)}, Available: {self._available_connections.qsize()}")
+                        logger.info(
+                            f"Connection {conn_alias} returned to pool. "
+                            f"In-use connections: {len(self._in_use_connections)}, "
+                            f"Available: {self._available_connections.qsize()}"
+                        )
                     else:
                         # Connection is unhealthy, attempt to recreate it
-                        logger.warning(f"Connection {conn_alias} is unhealthy after use, recreating...")
+                        logger.warning(
+                            f"Connection {conn_alias} is unhealthy after use, recreating..."
+                        )
                         try:
                             # Disconnect the stale connection
                             connections.disconnect(alias=conn_alias)
-                            
+
                             # Create a new connection with the same alias
                             self._create_connection(conn_alias)
-                            
+
                             # Return the new healthy connection to the pool
                             self._available_connections.put(conn_alias)
-                            logger.info(f"Connection {conn_alias} recreated and returned to pool. In-use connections: {len(self._in_use_connections)}, Available: {self._available_connections.qsize()}")
+                            logger.info(
+                                f"Connection {conn_alias} recreated and returned to pool. "
+                                f"In-use connections: {len(self._in_use_connections)}, "
+                                f"Available: {self._available_connections.qsize()}"
+                            )
                         except Exception as e:
                             # Failed to recreate connection - this is serious
-                            logger.error(f"Failed to recreate connection {conn_alias}: {e}")
-                            # Don't return the connection to the pool - pool size is now reduced by 1
+                            logger.error(
+                                f"Failed to recreate connection {conn_alias}: {e}"
+                            )
+                            # Don't return the connection to the pool - pool size is now
+                            # reduced by 1
                             # This should trigger monitoring alerts for degraded pool capacity
                             logger.error(
-                                f"Connection pool capacity reduced to {self._available_connections.qsize()} "
-                                f"available connections (target: {self.config.connection.connection_pool_size})"
+                                f"Connection pool capacity reduced to "
+                                f"{self._available_connections.qsize()} available connections "
+                                f"(target: {self.config.connection.connection_pool_size})"
                             )
                 else:
                     # If pool is closed, actually close this connection
                     try:
                         connections.disconnect(alias=conn_alias)
-                        logger.info(f"Connection {conn_alias} closed (pool is shutting down)")
+                        logger.info(
+                            f"Connection {conn_alias} closed (pool is shutting down)"
+                        )
                     except Exception:
                         pass
-                        
+
         except queue.Empty:
             raise ConnectionPoolExhaustedError(
                 f"No connections available in the pool within {timeout} seconds. "
-                f"Consider increasing connection_pool_size (current: {self.config.connection.connection_pool_size})."
-            )
-    
+                f"Consider increasing connection_pool_size "
+                f"(current: {self.config.connection.connection_pool_size})."
+            ) from None
+
     def acquire_reference(self):
         """
         Increment the reference count when a ConnectionManager starts using this pool.
-        
+
         This method implements reference counting to ensure the pool stays alive
         as long as at least one ConnectionManager is using it. This is the
         enterprise-grade solution for managing shared resources across multiple clients.
         """
         with self._lock:
             self._reference_count += 1
-            logger.debug(f"Pool reference acquired. Current reference count: {self._reference_count}")
-    
+            logger.debug(
+                f"Pool reference acquired. Current reference count: {self._reference_count}"
+            )
+
     def release_reference(self):
         """
         Decrement the reference count when a ConnectionManager is done with this pool.
-        
+
         This method decrements the reference count and only closes the pool when
         the count reaches zero (i.e., no more clients are using it). This ensures
         the pool stays alive for other clients while properly cleaning up when
         no longer needed.
-        
+
         Returns:
             bool: True if the pool was actually closed, False if still in use
         """
         with self._lock:
             if self._reference_count > 0:
                 self._reference_count -= 1
-                logger.debug(f"Pool reference released. Current reference count: {self._reference_count}")
-                
+                logger.debug(
+                    f"Pool reference released. Current reference count: {self._reference_count}"
+                )
+
                 # Only actually close the pool when no more references exist
                 if self._reference_count == 0:
                     logger.info("No more references to connection pool, closing it")
                     self._close_pool_internal()
                     return True
             return False
-    
+
     def _close_pool_internal(self):
         """
         Internal method to actually close the pool and its connections.
-        
+
         This method contains the actual pool closing logic that was previously
         in the close() method. It's now only called when the reference count
         reaches zero, ensuring proper resource cleanup.
         """
         if self._closed:
             return
-            
+
         self._closed = True
-        
+
         # Close all available connections
         while not self._available_connections.empty():
             try:
@@ -346,19 +386,19 @@ class MilvusConnectionPool:
                 logger.debug(f"Closed connection: {conn_alias}")
             except Exception as e:
                 logger.warning(f"Error closing connection: {e}")
-        
+
         # Log warning about in-use connections
         if self._in_use_connections:
             logger.warning(
                 f"{len(self._in_use_connections)} connections still in use during pool shutdown"
             )
-            
+
         logger.info("Milvus connection pool closed")
-        
+
         # Reset the singleton instance so a new pool can be created if needed
         with MilvusConnectionPool._lock:
             MilvusConnectionPool._instance = None
-    
+
     def close(self):
         """
         Close all connections in the pool and release resources.
@@ -375,17 +415,17 @@ class MilvusConnectionPool:
 
         Note: In-use connections will be logged as warnings but the pool
         will still be marked as closed, preventing new connection acquisitions.
-        
+
         DEPRECATED: This method is kept for backward compatibility but should
         not be called directly. Use release_reference() instead for proper
         reference counting behavior.
         """
-        logger.warning("close() called directly on connection pool - this bypasses reference counting")
+        logger.warning(
+            "close() called directly on connection pool - this bypasses reference counting"
+        )
         self._close_pool_internal()
-            
+
     def __del__(self):
         """Ensure connections are closed when the pool is garbage collected"""
-        try:
+        with suppress(Exception):
             self.close()
-        except Exception:
-            pass

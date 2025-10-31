@@ -14,7 +14,9 @@ These exceptions contribute to system robustness by:
 
 from milvus_ops.milvus_ops_exceptions import (
     ConnectionError as BaseConnectionError,
-    OperationTimeoutError
+)
+from milvus_ops.milvus_ops_exceptions import (
+    OperationTimeoutError,
 )
 
 
@@ -26,7 +28,6 @@ class ConnectionError(BaseConnectionError):
     management system and allows applications to catch all connection errors
     uniformly while still providing access to specific error details.
     """
-    pass
 
 
 class ConnectionPoolExhaustedError(ConnectionError):
@@ -37,7 +38,6 @@ class ConnectionPoolExhaustedError(ConnectionError):
     load and no connections are available in the pool. Applications can use
     this to implement queuing, scaling, or graceful degradation strategies.
     """
-    pass
 
 
 class ConnectionTimeoutError(ConnectionError):
@@ -48,7 +48,6 @@ class ConnectionTimeoutError(ConnectionError):
     problems. It enables applications to distinguish between different types
     of connection failures and implement appropriate retry or fallback strategies.
     """
-    pass
 
 
 class ConnectionAuthenticationError(ConnectionError):
@@ -59,7 +58,6 @@ class ConnectionAuthenticationError(ConnectionError):
     applications to handle authentication failures separately from other
     connection problems and implement proper security measures.
     """
-    pass
 
 
 class ConnectionClosedError(ConnectionError):
@@ -70,7 +68,6 @@ class ConnectionClosedError(ConnectionError):
     could lead to unpredictable behavior or errors. It ensures resource
     safety and helps detect connection lifecycle issues.
     """
-    pass
 
 
 class ConnectionInitializationError(ConnectionError):
@@ -81,7 +78,6 @@ class ConnectionInitializationError(ConnectionError):
     startup, allowing for early failure detection and proper initialization
     error handling rather than encountering issues during runtime.
     """
-    pass
 
 
 class MaxRetriesExceededError(ConnectionError):
@@ -93,7 +89,6 @@ class MaxRetriesExceededError(ConnectionError):
     Applications can use this to trigger circuit breakers or escalate to
     human intervention.
     """
-    pass
 
 
 class ServerUnavailableError(ConnectionError):
@@ -104,20 +99,19 @@ class ServerUnavailableError(ConnectionError):
     and server-side availability problems, enabling applications to implement
     different recovery strategies for each scenario.
     """
-    pass
 
 
 # Re-export OperationTimeoutError from base exceptions for convenience
 # This is defined in milvus_ops_exceptions.py but re-exported here
 # so connection_manager can import it from connection_exceptions
 __all__ = [
-    'ConnectionError',
-    'ConnectionPoolExhaustedError',
-    'ConnectionTimeoutError',
-    'ConnectionAuthenticationError',
-    'ConnectionClosedError',
-    'ConnectionInitializationError',
-    'MaxRetriesExceededError',
-    'ServerUnavailableError',
-    'OperationTimeoutError'
+    "ConnectionError",
+    "ConnectionPoolExhaustedError",
+    "ConnectionTimeoutError",
+    "ConnectionAuthenticationError",
+    "ConnectionClosedError",
+    "ConnectionInitializationError",
+    "MaxRetriesExceededError",
+    "ServerUnavailableError",
+    "OperationTimeoutError",
 ]
