@@ -1225,6 +1225,494 @@ def complex_documents_with_metadata():
 
 
 # ============================================================================
+# Index Operations Fixtures
+# ============================================================================
+
+
+@pytest.fixture
+def mock_index_operation_config():
+    """
+    Create a mock IndexOperationConfig for testing.
+
+    Coverage: Tests IndexOperationConfig initialization and attribute access.
+    """
+    from milvus_ops.index_operations.config import IndexOperationConfig
+
+    config = IndexOperationConfig(
+        default_timeout=60.0,
+        build_progress_poll_interval=2.0,
+        max_concurrent_builds=0,
+        enable_timing=True,
+        auto_optimize_params=False,
+        resource_monitoring=False,
+        retry_transient_errors=True,
+        max_transient_retries=3,
+        transient_retry_delay=0.5,
+    )
+    return config
+
+
+@pytest.fixture
+def sample_index_description():
+    """
+    Create a sample IndexDescription for testing.
+
+    Coverage: IndexDescription creation and property access.
+    """
+    from datetime import datetime, timezone
+
+    from milvus_ops.index_operations.models.entities import (
+        IndexDescription,
+        IndexState,
+    )
+
+    return IndexDescription(
+        collection_name="test_collection",
+        field_name="embedding",
+        index_name="embedding_index",
+        index_type="HNSW",
+        metric_type="COSINE",
+        params={"M": 16, "efConstruction": 200},
+        state=IndexState.CREATED,
+        created_at=datetime.now(timezone.utc),
+        indexed_rows=10000,
+        index_size_bytes=1024 * 1024 * 50,  # 50 MB
+    )
+
+
+@pytest.fixture
+def sample_index_build_progress_creating():
+    """
+    Create a sample IndexBuildProgress in CREATING state.
+
+    Coverage: IndexBuildProgress creation for in-progress builds.
+    """
+    from datetime import datetime, timezone
+
+    from milvus_ops.index_operations.models.entities import (
+        IndexBuildProgress,
+        IndexState,
+    )
+
+    return IndexBuildProgress(
+        collection_name="test_collection",
+        field_name="embedding",
+        state=IndexState.CREATING,
+        percentage=45.0,
+        start_time=datetime.now(timezone.utc),
+        current_time=datetime.now(timezone.utc),
+        total_rows=10000,
+        processed_rows=4500,
+    )
+
+
+@pytest.fixture
+def sample_index_build_progress_complete():
+    """
+    Create a sample IndexBuildProgress in CREATED state.
+
+    Coverage: IndexBuildProgress creation for completed builds.
+    """
+    from datetime import datetime, timezone
+
+    from milvus_ops.index_operations.models.entities import (
+        IndexBuildProgress,
+        IndexState,
+    )
+
+    return IndexBuildProgress(
+        collection_name="test_collection",
+        field_name="embedding",
+        state=IndexState.CREATED,
+        percentage=100.0,
+        start_time=datetime.now(timezone.utc),
+        current_time=datetime.now(timezone.utc),
+        total_rows=10000,
+        processed_rows=10000,
+    )
+
+
+@pytest.fixture
+def sample_index_build_progress_failed():
+    """
+    Create a sample IndexBuildProgress in FAILED state.
+
+    Coverage: IndexBuildProgress creation for failed builds.
+    """
+    from datetime import datetime, timezone
+
+    from milvus_ops.index_operations.models.entities import (
+        IndexBuildProgress,
+        IndexState,
+    )
+
+    return IndexBuildProgress(
+        collection_name="test_collection",
+        field_name="embedding",
+        state=IndexState.FAILED,
+        percentage=30.0,
+        start_time=datetime.now(timezone.utc),
+        current_time=datetime.now(timezone.utc),
+        failed_reason="Insufficient memory",
+        total_rows=10000,
+        processed_rows=3000,
+    )
+
+
+@pytest.fixture
+def sample_index_params_ivf_flat():
+    """
+    Create a sample IvfFlatParams for testing.
+
+    Coverage: IvfFlatParams creation and validation.
+    """
+    from milvus_ops.index_operations.models.parameters import IvfFlatParams
+
+    return IvfFlatParams(nlist=1024)
+
+
+@pytest.fixture
+def sample_index_params_hnsw():
+    """
+    Create a sample HNSWParams for testing.
+
+    Coverage: HNSWParams creation and validation.
+    """
+    from milvus_ops.index_operations.models.parameters import HNSWParams
+
+    return HNSWParams(M=16, efConstruction=200)
+
+
+@pytest.fixture
+def sample_index_params_ivf_pq():
+    """
+    Create a sample IvfPQParams for testing.
+
+    Coverage: IvfPQParams creation and validation.
+    """
+    from milvus_ops.index_operations.models.parameters import IvfPQParams
+
+    return IvfPQParams(nlist=1024, m=8, nbits=8)
+
+
+@pytest.fixture
+def sample_index_params_annoy():
+    """
+    Create a sample ANNOYParams for testing.
+
+    Coverage: ANNOYParams creation and validation.
+    """
+    from milvus_ops.index_operations.models.parameters import ANNOYParams
+
+    return ANNOYParams(n_trees=8)
+
+
+@pytest.fixture
+def mock_index_tracker_registry():
+    """
+    Create a mock IndexBuildTrackerRegistry for testing.
+
+    Coverage: IndexBuildTrackerRegistry mocking.
+    """
+    from unittest.mock import MagicMock
+
+    from milvus_ops.index_operations.utils.progress import (
+        IndexBuildTrackerRegistry,
+    )
+
+    registry = MagicMock(spec=IndexBuildTrackerRegistry)
+    registry._trackers = {}
+    registry.register_build = MagicMock()
+    registry.get_tracker = MagicMock()
+    registry.update_progress = MagicMock()
+    registry.get_progress = MagicMock()
+    registry.remove_tracker = MagicMock()
+    registry.get_active_builds = MagicMock(return_value=[])
+    registry.get_all_builds = MagicMock(return_value=[])
+    return registry
+
+
+@pytest.fixture
+def mock_pymilvus_index():
+    """
+    Create a mock pymilvus Index object for testing.
+
+    Coverage: Mock pymilvus index interactions.
+    """
+    from unittest.mock import MagicMock
+
+    mock_index = MagicMock()
+    mock_index.field_name = "embedding"
+    mock_index.index_name = "embedding_index"
+    mock_index.params = {
+        "metric_type": "COSINE",
+        "index_type": "HNSW",
+        "params": {"M": 16, "efConstruction": 200},
+    }
+    return mock_index
+
+
+@pytest.fixture
+def sample_index_metadata():
+    """
+    Create sample index metadata dictionary for testing.
+
+    Coverage: Index metadata structure testing.
+    """
+    return {
+        "collection_name": "test_collection",
+        "field_name": "embedding",
+        "index_name": "embedding_index",
+        "index_type": "HNSW",
+        "metric_type": "COSINE",
+        "params": {"M": 16, "efConstruction": 200},
+        "state": "CREATED",
+        "index_size_bytes": 52428800,  # 50 MB
+        "indexed_rows": 10000,
+    }
+
+
+@pytest.fixture
+def index_type_variations():
+    """
+    Provide various index types for parameterized tests.
+
+    Coverage: Index type testing across different types.
+    """
+    from milvus_ops.collection_operations import IndexType
+
+    return [
+        IndexType.FLAT,
+        IndexType.IVF_FLAT,
+        IndexType.IVF_SQ8,
+        IndexType.IVF_PQ,
+        IndexType.HNSW,
+        IndexType.ANNOY,
+    ]
+
+
+@pytest.fixture
+def metric_type_variations():
+    """
+    Provide various metric types for parameterized tests.
+
+    Coverage: Metric type testing across different types.
+    """
+    from milvus_ops.collection_operations import MetricType
+
+    return [
+        MetricType.L2,
+        MetricType.IP,
+        MetricType.COSINE,
+        MetricType.HAMMING,
+        MetricType.JACCARD,
+        MetricType.TANIMOTO,
+    ]
+
+
+@pytest.fixture
+def vector_dimension_samples():
+    """
+    Provide various vector dimensions for testing.
+
+    Coverage: Vector dimension testing across different sizes.
+    """
+    return [
+        1,  # Minimum
+        8,  # Minimum for binary vectors
+        64,  # Common small dimension
+        128,  # Common dimension
+        256,  # Medium dimension
+        512,  # Common large dimension
+        768,  # Large dimension (e.g., BERT)
+        1024,  # Very large dimension
+        1536,  # Very large dimension (e.g., OpenAI embeddings)
+        2048,  # Maximum practical dimension
+    ]
+
+
+@pytest.fixture
+def mock_collection_with_index():
+    """
+    Create a mock collection with index information.
+
+    Coverage: Collection with index mocking for integration tests.
+    """
+    from unittest.mock import MagicMock
+
+    from milvus_ops.collection_operations import DataType
+
+    mock_collection = MagicMock()
+    mock_collection.name = "test_collection"
+
+    # Mock indexes attribute
+    mock_index = MagicMock()
+    mock_index.field_name = "embedding"
+    mock_index.index_name = "embedding_index"
+    mock_index.params = {
+        "metric_type": "COSINE",
+        "index_type": "HNSW",
+        "params": {"M": 16, "efConstruction": 200},
+    }
+    mock_collection.indexes = [mock_index]
+
+    # Mock schema with vector field
+    from milvus_ops.collection_operations.schema import (
+        CollectionSchema,
+        FieldSchema,
+    )
+
+    fields = [
+        FieldSchema(
+            name="id",
+            dtype=DataType.INT64,
+            is_primary=True,
+            auto_id=True,
+        ),
+        FieldSchema(
+            name="embedding",
+            dtype=DataType.FLOAT_VECTOR,
+            dim=128,
+        ),
+    ]
+    mock_collection.schema = CollectionSchema(fields=fields)
+
+    return mock_collection
+
+
+@pytest.fixture
+def temp_index_config_dir(tmp_path):
+    """
+    Create a temporary directory for index config files.
+
+    Coverage: Temporary file system setup for index configs.
+    """
+    config_dir = tmp_path / "index_configs"
+    config_dir.mkdir()
+    return config_dir
+
+
+@pytest.fixture
+def index_cleanup_handler():
+    """
+    Cleanup handler for test resources.
+
+    Coverage: Resource cleanup for index operation tests.
+    """
+    cleanup_items = []
+
+    def _register(item):
+        cleanup_items.append(item)
+
+    def _cleanup():
+        for item in cleanup_items:
+            if hasattr(item, "cleanup"):
+                item.cleanup()
+            elif hasattr(item, "remove_tracker"):
+                # For tracker registries
+                for tracker in list(item._trackers.values()):
+                    if hasattr(tracker, "cleanup"):
+                        tracker.cleanup()
+                item._trackers.clear()
+
+    yield _register
+    _cleanup()
+
+
+@pytest.fixture
+def mock_index_manager_dependencies():
+    """
+    Create mocked dependencies for IndexManager testing.
+
+    Coverage: IndexManager dependency mocking.
+    """
+    from unittest.mock import AsyncMock, MagicMock
+
+    mock_connection_manager = MagicMock()
+    mock_connection_manager.execute_operation_async = AsyncMock()
+    mock_connection_manager.check_server_status = MagicMock(return_value=True)
+
+    mock_collection_manager = MagicMock()
+    mock_collection_manager.has_collection = AsyncMock(return_value=True)
+    mock_collection_manager.describe_collection = AsyncMock()
+
+    return {
+        "connection_manager": mock_connection_manager,
+        "collection_manager": mock_collection_manager,
+    }
+
+
+@pytest.fixture
+def sample_index_result_success():
+    """
+    Create a sample successful IndexResult for testing.
+
+    Coverage: IndexResult creation for successful operations.
+    """
+    from milvus_ops.index_operations.models.entities import (
+        IndexResult,
+        IndexState,
+    )
+
+    return IndexResult(
+        success=True,
+        collection_name="test_collection",
+        field_name="embedding",
+        index_name="embedding_index",
+        operation="create",
+        state=IndexState.CREATED,
+        execution_time_ms=1234.5,
+    )
+
+
+@pytest.fixture
+def sample_index_result_failed():
+    """
+    Create a sample failed IndexResult for testing.
+
+    Coverage: IndexResult creation for failed operations.
+    """
+    from milvus_ops.index_operations.models.entities import (
+        IndexResult,
+        IndexState,
+    )
+
+    return IndexResult(
+        success=False,
+        collection_name="test_collection",
+        field_name="embedding",
+        index_name="embedding_index",
+        operation="create",
+        state=IndexState.FAILED,
+        error_message="Index creation failed",
+        execution_time_ms=567.8,
+    )
+
+
+@pytest.fixture
+def sample_index_stats():
+    """
+    Create a sample IndexStats for testing.
+
+    Coverage: IndexStats creation and property access.
+    """
+    from datetime import datetime, timezone
+
+    from milvus_ops.index_operations.models.entities import IndexStats
+
+    return IndexStats(
+        collection_name="test_collection",
+        field_name="embedding",
+        index_type="HNSW",
+        query_latency_ms=12.5,
+        memory_usage_bytes=1024 * 1024 * 100,  # 100 MB
+        disk_usage_bytes=1024 * 1024 * 80,  # 80 MB
+        indexed_vectors=10000,
+        last_updated=datetime.now(timezone.utc),
+    )
+
+
+# ============================================================================
 # Cleanup Utilities
 # ============================================================================
 

@@ -749,7 +749,7 @@ class IndexManager:
                 execution_time_ms=execution_time_ms,
             )
 
-    async def _drop_index_internal(self, alias: str, collection_name: str, field_name: str) -> None:
+    def _drop_index_internal(self, alias: str, collection_name: str, field_name: str) -> None:
         """
         Internal helper to drop an index.
 
@@ -810,16 +810,12 @@ class IndexManager:
         timeout = timeout or self._config.default_timeout
 
         try:
-            # Check if we have a tracker for this build
-            tracker = self._tracker_registry.get_tracker(collection_name, field_name)
-            if tracker and not tracker.is_complete():
-                return tracker.get_current_progress()
-
-            # Otherwise, check index state from Milvus
+            # First, check index state from Milvus to see if index is already created
+            # This takes priority over tracker status
             try:
                 index_desc = await self.describe_index(collection_name, field_name, timeout)
 
-                # If index exists and is complete, return 100% progress
+                # If index exists and is complete, return 100% progress regardless of tracker
                 if index_desc and index_desc.state == IndexState.CREATED:
                     return IndexBuildProgress(
                         collection_name=collection_name,
@@ -832,10 +828,15 @@ class IndexManager:
                         estimated_remaining_time_seconds=0.0,
                     )
             except IndexNotFoundError:
-                # This should not happen if _verify_collection_exists is called first
+                # Index doesn't exist, continue to check tracker
                 pass
 
-            # Default to unknown progress if index does not exist or state is not CREATED
+            # Check if we have an active tracker for this build
+            tracker = self._tracker_registry.get_tracker(collection_name, field_name)
+            if tracker and not tracker.is_complete():
+                return tracker.get_current_progress()
+
+            # Default to unknown progress if index does not exist and no active tracker
             return IndexBuildProgress(
                 collection_name=collection_name,
                 field_name=field_name,

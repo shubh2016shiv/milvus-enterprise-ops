@@ -21,6 +21,7 @@ Typical usage:
 """
 
 from typing import Any, ClassVar
+import warnings
 
 from pydantic import BaseModel, Field, model_validator, validator
 
@@ -158,7 +159,9 @@ class HNSWParams(IndexParams):
         if v < 8:
             raise ValueError("efConstruction must be at least 8")
         if v < 40:
-            raise ValueError("efConstruction < 40 may result in lower accuracy")
+            warnings.warn(
+                "efConstruction < 40 may result in lower accuracy", UserWarning, stacklevel=2
+            )
         return v
 
 
