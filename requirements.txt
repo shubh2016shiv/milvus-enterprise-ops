@@ -64,3 +64,7 @@ win32-setctime==1.2.0
     # via loguru
 
 google-generativeai
+
+ruff==0.14.2
+
+pre-commit==4.3.0
