@@ -5,16 +5,14 @@ This module provides strongly-typed configuration settings using Pydantic,
 with support for environment variables and YAML configuration files.
 """
 
-from typing import Dict, Any, Optional, List, Union
 from enum import Enum
-from pathlib import Path
-import os
 import inspect
 import logging
+import os
+from pathlib import Path
 
 from pydantic import Field
 from pydantic_settings import BaseSettings
-from pydantic_yaml import to_yaml_str, to_yaml_file
 
 # Logger setup
 logger = logging.getLogger(__name__)
@@ -22,37 +20,63 @@ logger = logging.getLogger(__name__)
 
 class ConsistencyLevel(str, Enum):
     """
-    Milvus consistency level options that determine the trade-off between consistency and performance.
+    Milvus consistency level options that determine the trade-off between
+    consistency and performance.
 
-    The consistency level affects how reads and writes are synchronized across distributed nodes:
-    - Higher consistency levels provide stronger guarantees but may impact performance
+    The consistency level affects how reads and writes are synchronized
+    across distributed nodes:
+    - Higher consistency levels provide stronger guarantees but may impact
+      performance
     - Lower consistency levels offer better performance but weaker guarantees
     """
-    STRONG = "Strong"  # Strongest consistency guarantee; ensures all operations are fully synchronized across all nodes before returning
-    BOUNDED = "Bounded"  # Provides a time-bounded staleness guarantee; reads may return slightly stale data within defined bounds
-    EVENTUALLY = "Eventually"  # Weakest consistency but highest performance; eventual consistency across all nodes
-    SESSION = "Session"  # Provides read-your-writes consistency within a single client session
+
+    # Strongest consistency guarantee; ensures all operations are fully
+    # synchronized across all nodes before returning
+    STRONG = "Strong"
+    # Provides a time-bounded staleness guarantee; reads may return slightly
+    # stale data within defined bounds
+    BOUNDED = "Bounded"
+    # Weakest consistency but highest performance; eventual consistency across
+    # all nodes
+    EVENTUALLY = "Eventually"
+    # Provides read-your-writes consistency within a single client session
+    SESSION = "Session"
 
 
 class MetricType(str, Enum):
     """
-    Milvus metric type options for measuring distance/similarity between vectors.
+    Milvus metric type options for measuring distance/similarity between
+    vectors.
 
-    The choice of metric type significantly impacts search results and should match your embedding model:
-    - Different metrics are suitable for different types of vector data and use cases
+    The choice of metric type significantly impacts search results and should
+    match your embedding model:
+    - Different metrics are suitable for different types of vector data and
+      use cases
     - The metric type must be compatible with your index type
     - Some metrics require normalized vectors (e.g., COSINE)
     """
-    L2 = "L2"  # Euclidean distance: Measures straight-line distance between vectors; lower values = more similar
-    IP = "IP"  # Inner Product: Dot product between vectors; higher values = more similar; vectors should be normalized
-    COSINE = "COSINE"  # Cosine similarity: Measures angle between vectors; higher values = more similar; best for semantic similarity
-    HAMMING = "HAMMING"  # Hamming distance: Counts differing bits between binary vectors; lower values = more similar
-    JACCARD = "JACCARD"  # Jaccard similarity: Ratio of intersection to union; higher values = more similar; used for sets
+
+    # Euclidean distance: Measures straight-line distance between vectors;
+    # lower values = more similar
+    L2 = "L2"
+    # Inner Product: Dot product between vectors; higher values = more similar;
+    # vectors should be normalized
+    IP = "IP"
+    # Cosine similarity: Measures angle between vectors; higher values = more
+    # similar; best for semantic similarity
+    COSINE = "COSINE"
+    # Hamming distance: Counts differing bits between binary vectors;
+    # lower values = more similar
+    HAMMING = "HAMMING"
+    # Jaccard similarity: Ratio of intersection to union; higher values = more
+    # similar; used for sets
+    JACCARD = "JACCARD"
 
 
 class IndexType(str, Enum):
     """
-    Milvus index type options that determine search algorithm, performance characteristics, and memory usage.
+    Milvus index type options that determine search algorithm, performance
+    characteristics, and memory usage.
 
     The choice of index type involves trade-offs between:
     - Search speed: How quickly results can be returned
@@ -60,13 +84,28 @@ class IndexType(str, Enum):
     - Build time: How long it takes to create the index
     - Memory usage: How much RAM the index requires
     """
-    FLAT = "FLAT"  # Brute-force exact search; 100% accuracy but slowest; suitable for small datasets or when perfect recall is required
-    IVF_FLAT = "IVF_FLAT"  # Inverted file with flat quantization; good balance of accuracy and speed; uses clustering to narrow search space
-    IVF_SQ8 = "IVF_SQ8"  # IVF with scalar quantization (8-bit); reduces memory by quantizing vectors; slight accuracy loss but better memory efficiency
-    IVF_PQ = "IVF_PQ"  # IVF with product quantization; significant memory reduction; suitable for very large datasets with acceptable accuracy loss
-    HNSW = "HNSW"  # Hierarchical Navigable Small World; excellent performance-accuracy trade-off; fast index building; suitable for dynamic data
-    ANNOY = "ANNOY"  # Approximate Nearest Neighbors Oh Yeah; tree-based approach; good for memory-constrained environments
-    SPARSE_INVERTED_INDEX = "SPARSE_INVERTED_INDEX"  # Specialized for sparse vectors; efficient for keyword/token-based search; used in hybrid search
+
+    # Brute-force exact search; 100% accuracy but slowest; suitable for small
+    # datasets or when perfect recall is required
+    FLAT = "FLAT"
+    # Inverted file with flat quantization; good balance of accuracy and speed;
+    # uses clustering to narrow search space
+    IVF_FLAT = "IVF_FLAT"
+    # IVF with scalar quantization (8-bit); reduces memory by quantizing
+    # vectors; slight accuracy loss but better memory efficiency
+    IVF_SQ8 = "IVF_SQ8"
+    # IVF with product quantization; significant memory reduction; suitable for
+    # very large datasets with acceptable accuracy loss
+    IVF_PQ = "IVF_PQ"
+    # Hierarchical Navigable Small World; excellent performance-accuracy
+    # trade-off; fast index building; suitable for dynamic data
+    HNSW = "HNSW"
+    # Approximate Nearest Neighbors Oh Yeah; tree-based approach; good for
+    # memory-constrained environments
+    ANNOY = "ANNOY"
+    # Specialized for sparse vectors; efficient for keyword/token-based search;
+    # used in hybrid search
+    SPARSE_INVERTED_INDEX = "SPARSE_INVERTED_INDEX"
 
 
 class ConnectionSettings(BaseSettings):
@@ -79,34 +118,61 @@ class ConnectionSettings(BaseSettings):
     - Connection pooling for performance optimization
     - Retry behavior for resilience against transient failures
     """
-    host: str = Field("localhost", env="MILVUS_HOST",
-                     description="Hostname or IP address of the Milvus server")
-    port: str = Field("19530", env="MILVUS_PORT",
-                     description="Port number on which Milvus server is listening")
-    user: str = Field("", env="MILVUS_USER",
-                     description="Username for authentication (if enabled on server)")
-    password: str = Field("", env="MILVUS_PASSWORD",
-                         description="Password for authentication (if enabled on server)")
-    secure: bool = Field(False, env="MILVUS_SECURE",
-                        description="Whether to use TLS/SSL for secure connection")
-    timeout: int = Field(60, env="MILVUS_TIMEOUT",
-                        description="Connection timeout in seconds")
-    connection_pool_size: int = Field(10, env="MILVUS_CONNECTION_POOL_SIZE",
-                                     description="Maximum number of connections to maintain in the pool")
-    retry_count: int = Field(3, env="MILVUS_RETRY_COUNT",
-                            description="Number of times to retry failed operations")
-    retry_interval: float = Field(1.0, env="MILVUS_RETRY_INTERVAL",
-                                 description="Time in seconds to wait between retry attempts")
-    max_requests_per_second: int = Field(1000, env="MILVUS_MAX_REQUESTS_PER_SECOND",
-                                        description="Maximum requests per second (rate limiting, 0=disabled)")
-    rate_limiter_burst_multiplier: float = Field(2.0, env="MILVUS_RATE_LIMITER_BURST_MULTIPLIER",
-                                                 description="Burst capacity multiplier for rate limiter")
-    enable_retry_budget: bool = Field(True, env="MILVUS_ENABLE_RETRY_BUDGET",
-                                     description="Enable retry budget to prevent retry storms")
-    retry_budget_min_success_rate: float = Field(0.8, env="MILVUS_RETRY_BUDGET_MIN_SUCCESS_RATE",
-                                                description="Minimum success rate (0.0-1.0) to allow retries")
-    retry_budget_window_seconds: int = Field(10, env="MILVUS_RETRY_BUDGET_WINDOW_SECONDS",
-                                            description="Time window for retry budget calculation")
+
+    host: str = Field(
+        "localhost", env="MILVUS_HOST", description="Hostname or IP address of the Milvus server"
+    )
+    port: str = Field(
+        "19530", env="MILVUS_PORT", description="Port number on which Milvus server is listening"
+    )
+    user: str = Field(
+        "", env="MILVUS_USER", description="Username for authentication (if enabled on server)"
+    )
+    password: str = Field(
+        "", env="MILVUS_PASSWORD", description="Password for authentication (if enabled on server)"
+    )
+    secure: bool = Field(
+        False, env="MILVUS_SECURE", description="Whether to use TLS/SSL for secure connection"
+    )
+    timeout: int = Field(60, env="MILVUS_TIMEOUT", description="Connection timeout in seconds")
+    connection_pool_size: int = Field(
+        10,
+        env="MILVUS_CONNECTION_POOL_SIZE",
+        description="Maximum number of connections to maintain in pool",
+    )
+    retry_count: int = Field(
+        3, env="MILVUS_RETRY_COUNT", description="Number of times to retry failed operations"
+    )
+    retry_interval: float = Field(
+        1.0,
+        env="MILVUS_RETRY_INTERVAL",
+        description="Time in seconds to wait between retry attempts",
+    )
+    max_requests_per_second: int = Field(
+        1000,
+        env="MILVUS_MAX_REQUESTS_PER_SECOND",
+        description="Maximum requests per second (rate limiting; 0=disabled)",
+    )
+    rate_limiter_burst_multiplier: float = Field(
+        2.0,
+        env="MILVUS_RATE_LIMITER_BURST_MULTIPLIER",
+        description="Burst capacity multiplier for rate limiter",
+    )
+    enable_retry_budget: bool = Field(
+        True,
+        env="MILVUS_ENABLE_RETRY_BUDGET",
+        description="Enable retry budget to prevent retry storms",
+    )
+    retry_budget_min_success_rate: float = Field(
+        0.8,
+        env="MILVUS_RETRY_BUDGET_MIN_SUCCESS_RATE",
+        description="Minimum success rate (0.0-1.0) to allow retries",
+    )
+    retry_budget_window_seconds: int = Field(
+        10,
+        env="MILVUS_RETRY_BUDGET_WINDOW_SECONDS",
+        description="Time window for retry budget calculation",
+    )
 
     class Config:
         env_prefix = ""
@@ -122,12 +188,29 @@ class CollectionSettings(BaseSettings):
     - Consistency guarantees for distributed operations
     - Schema versioning for collection evolution
     """
-    auto_id: bool = Field(True, env="MILVUS_AUTO_ID",
-                         description="Whether Milvus should automatically generate primary key IDs (true) or use provided IDs (false)")
-    consistency_level: ConsistencyLevel = Field(ConsistencyLevel.STRONG, env="MILVUS_CONSISTENCY_LEVEL",
-                                              description="Consistency level for read/write operations, balancing consistency vs performance")
-    schema_version: str = Field("1", env="MILVUS_SCHEMA_VERSION",
-                              description="Version identifier for the collection schema, useful for tracking schema evolution")
+
+    auto_id: bool = Field(
+        True,
+        env="MILVUS_AUTO_ID",
+        description=(
+            "Whether Milvus should automatically generate primary key IDs "
+            "(true) or use provided IDs (false)"
+        ),
+    )
+    consistency_level: ConsistencyLevel = Field(
+        ConsistencyLevel.STRONG,
+        env="MILVUS_CONSISTENCY_LEVEL",
+        description=(
+            "Consistency level for read/write operations, balancing " "consistency vs performance"
+        ),
+    )
+    schema_version: str = Field(
+        "1",
+        env="MILVUS_SCHEMA_VERSION",
+        description=(
+            "Version identifier for the collection schema, useful for " "tracking schema evolution"
+        ),
+    )
 
     class Config:
         env_prefix = ""
@@ -145,10 +228,23 @@ class HNSWIndexParams(BaseSettings):
     - Supports dynamic data insertion without full rebuilds
     - Generally offers better recall than IVF-based indexes at the same speed
     """
-    M: int = Field(16, env="MILVUS_HNSW_M",
-                 description="Number of bi-directional links created for each new element (higher = better recall but more memory)")
-    efConstruction: int = Field(200, env="MILVUS_HNSW_EF_CONSTRUCTION",
-                              description="Size of the dynamic candidate list during index construction (higher = better quality but slower builds)")
+
+    M: int = Field(
+        16,
+        env="MILVUS_HNSW_M",
+        description=(
+            "Number of bi-directional links created for each new element "
+            "(higher = better recall but more memory)"
+        ),
+    )
+    efConstruction: int = Field(
+        200,
+        env="MILVUS_HNSW_EF_CONSTRUCTION",
+        description=(
+            "Size of the dynamic candidate list during index construction "
+            "(higher = better quality but slower builds)"
+        ),
+    )
 
 
 class IVFIndexParams(BaseSettings):
@@ -161,8 +257,15 @@ class IVFIndexParams(BaseSettings):
     - Offers good balance between memory usage, build speed, and search performance
     - Suitable for large-scale datasets where some accuracy can be traded for speed
     """
-    nlist: int = Field(1024, env="MILVUS_IVF_NLIST",
-                      description="Number of clusters to divide the vector space into (higher = better recall but slower builds and more memory)")
+
+    nlist: int = Field(
+        1024,
+        env="MILVUS_IVF_NLIST",
+        description=(
+            "Number of clusters to divide the vector space into "
+            "(higher = better recall but slower builds and more memory)"
+        ),
+    )
 
 
 class HNSWSearchParams(BaseSettings):
@@ -174,8 +277,15 @@ class HNSWSearchParams(BaseSettings):
     - Allow fine-tuning performance based on specific query requirements
     - Critical for optimizing search latency vs. recall rate
     """
-    ef: int = Field(64, env="MILVUS_HNSW_EF",
-                   description="Size of the dynamic candidate list during search (higher = better recall but slower search)")
+
+    ef: int = Field(
+        64,
+        env="MILVUS_HNSW_EF",
+        description=(
+            "Size of the dynamic candidate list during search "
+            "(higher = better recall but slower search)"
+        ),
+    )
 
 
 class IVFSearchParams(BaseSettings):
@@ -187,8 +297,15 @@ class IVFSearchParams(BaseSettings):
     - Directly controls the trade-off between search speed and recall
     - One of the most important parameters for tuning IVF-based search performance
     """
-    nprobe: int = Field(16, env="MILVUS_IVF_NPROBE",
-                       description="Number of clusters to search during query (higher = better recall but slower search)")
+
+    nprobe: int = Field(
+        16,
+        env="MILVUS_IVF_NPROBE",
+        description=(
+            "Number of clusters to search during query "
+            "(higher = better recall but slower search)"
+        ),
+    )
 
 
 class IndexSettings(BaseSettings):
@@ -201,33 +318,58 @@ class IndexSettings(BaseSettings):
     - Configures metric types and parameters for each index
     - Enables optimization of index building for different use cases
     """
+
     # HNSW index settings
-    hnsw_index_type: IndexType = Field(IndexType.HNSW, env="MILVUS_HNSW_INDEX_TYPE",
-                                      description="Index type for HNSW-based indexes")
-    hnsw_metric_type: MetricType = Field(MetricType.COSINE, env="MILVUS_HNSW_METRIC_TYPE",
-                                        description="Distance metric for HNSW index (COSINE recommended for semantic search)")
-    hnsw_params: HNSWIndexParams = Field(default_factory=HNSWIndexParams,
-                                        description="HNSW-specific parameters for index building")
+    hnsw_index_type: IndexType = Field(
+        IndexType.HNSW,
+        env="MILVUS_HNSW_INDEX_TYPE",
+        description="Index type for HNSW-based indexes",
+    )
+    hnsw_metric_type: MetricType = Field(
+        MetricType.COSINE,
+        env="MILVUS_HNSW_METRIC_TYPE",
+        description=("Distance metric for HNSW index " "(COSINE recommended for semantic search)"),
+    )
+    hnsw_params: HNSWIndexParams = Field(
+        default_factory=HNSWIndexParams, description="HNSW-specific parameters for index building"
+    )
 
     # IVF index settings
-    ivf_index_type: IndexType = Field(IndexType.IVF_FLAT, env="MILVUS_IVF_INDEX_TYPE",
-                                     description="Index type for IVF-based indexes")
-    ivf_metric_type: MetricType = Field(MetricType.COSINE, env="MILVUS_IVF_METRIC_TYPE",
-                                       description="Distance metric for IVF index")
-    ivf_params: IVFIndexParams = Field(default_factory=IVFIndexParams,
-                                      description="IVF-specific parameters for index building")
+    ivf_index_type: IndexType = Field(
+        IndexType.IVF_FLAT,
+        env="MILVUS_IVF_INDEX_TYPE",
+        description="Index type for IVF-based indexes",
+    )
+    ivf_metric_type: MetricType = Field(
+        MetricType.COSINE, env="MILVUS_IVF_METRIC_TYPE", description="Distance metric for IVF index"
+    )
+    ivf_params: IVFIndexParams = Field(
+        default_factory=IVFIndexParams, description="IVF-specific parameters for index building"
+    )
 
     # FLAT index settings (exact search)
-    flat_index_type: IndexType = Field(IndexType.FLAT, env="MILVUS_FLAT_INDEX_TYPE",
-                                      description="Index type for exact (brute force) search")
-    flat_metric_type: MetricType = Field(MetricType.COSINE, env="MILVUS_FLAT_METRIC_TYPE",
-                                        description="Distance metric for FLAT index")
+    flat_index_type: IndexType = Field(
+        IndexType.FLAT,
+        env="MILVUS_FLAT_INDEX_TYPE",
+        description="Index type for exact (brute force) search",
+    )
+    flat_metric_type: MetricType = Field(
+        MetricType.COSINE,
+        env="MILVUS_FLAT_METRIC_TYPE",
+        description="Distance metric for FLAT index",
+    )
 
     # Sparse vector index settings
-    sparse_index_type: IndexType = Field(IndexType.SPARSE_INVERTED_INDEX, env="MILVUS_SPARSE_INDEX_TYPE",
-                                        description="Index type for sparse vectors (used in hybrid search)")
-    sparse_metric_type: MetricType = Field(MetricType.IP, env="MILVUS_SPARSE_METRIC_TYPE",
-                                          description="Distance metric for sparse vector index (IP recommended)")
+    sparse_index_type: IndexType = Field(
+        IndexType.SPARSE_INVERTED_INDEX,
+        env="MILVUS_SPARSE_INDEX_TYPE",
+        description="Index type for sparse vectors (used in hybrid search)",
+    )
+    sparse_metric_type: MetricType = Field(
+        MetricType.IP,
+        env="MILVUS_SPARSE_METRIC_TYPE",
+        description=("Distance metric for sparse vector index (IP recommended)"),
+    )
 
     class Config:
         env_prefix = ""
@@ -245,31 +387,54 @@ class SearchSettings(BaseSettings):
     - Enables fine-tuning of hybrid search weights
     - Can be adjusted at query time without rebuilding indexes
     """
+
     # HNSW search settings
-    hnsw_metric_type: MetricType = Field(MetricType.COSINE, env="MILVUS_HNSW_SEARCH_METRIC_TYPE",
-                                        description="Distance metric for HNSW search (should match index metric type)")
-    hnsw_params: HNSWSearchParams = Field(default_factory=HNSWSearchParams,
-                                         description="HNSW-specific parameters for search optimization")
+    hnsw_metric_type: MetricType = Field(
+        MetricType.COSINE,
+        env="MILVUS_HNSW_SEARCH_METRIC_TYPE",
+        description=("Distance metric for HNSW search " "(should match index metric type)"),
+    )
+    hnsw_params: HNSWSearchParams = Field(
+        default_factory=HNSWSearchParams,
+        description="HNSW-specific parameters for search optimization",
+    )
 
     # IVF search settings
-    ivf_metric_type: MetricType = Field(MetricType.COSINE, env="MILVUS_IVF_SEARCH_METRIC_TYPE",
-                                       description="Distance metric for IVF search (should match index metric type)")
-    ivf_params: IVFSearchParams = Field(default_factory=IVFSearchParams,
-                                       description="IVF-specific parameters for search optimization")
+    ivf_metric_type: MetricType = Field(
+        MetricType.COSINE,
+        env="MILVUS_IVF_SEARCH_METRIC_TYPE",
+        description=("Distance metric for IVF search " "(should match index metric type)"),
+    )
+    ivf_params: IVFSearchParams = Field(
+        default_factory=IVFSearchParams,
+        description="IVF-specific parameters for search optimization",
+    )
 
     # FLAT search settings
-    flat_metric_type: MetricType = Field(MetricType.COSINE, env="MILVUS_FLAT_SEARCH_METRIC_TYPE",
-                                        description="Distance metric for FLAT search (exact search)")
+    flat_metric_type: MetricType = Field(
+        MetricType.COSINE,
+        env="MILVUS_FLAT_SEARCH_METRIC_TYPE",
+        description="Distance metric for FLAT search (exact search)",
+    )
 
     # Sparse vector search settings
-    sparse_metric_type: MetricType = Field(MetricType.IP, env="MILVUS_SPARSE_SEARCH_METRIC_TYPE",
-                                          description="Distance metric for sparse vector search")
+    sparse_metric_type: MetricType = Field(
+        MetricType.IP,
+        env="MILVUS_SPARSE_SEARCH_METRIC_TYPE",
+        description="Distance metric for sparse vector search",
+    )
 
     # Hybrid search weights
-    hybrid_sparse_weight: float = Field(0.3, env="MILVUS_HYBRID_SPARSE_WEIGHT",
-                                       description="Weight for sparse vector results in hybrid search (0.0-1.0)")
-    hybrid_dense_weight: float = Field(0.7, env="MILVUS_HYBRID_DENSE_WEIGHT",
-                                      description="Weight for dense vector results in hybrid search (0.0-1.0)")
+    hybrid_sparse_weight: float = Field(
+        0.3,
+        env="MILVUS_HYBRID_SPARSE_WEIGHT",
+        description=("Weight for sparse vector results in hybrid search (0.0-1.0)"),
+    )
+    hybrid_dense_weight: float = Field(
+        0.7,
+        env="MILVUS_HYBRID_DENSE_WEIGHT",
+        description=("Weight for dense vector results in hybrid search (0.0-1.0)"),
+    )
 
     class Config:
         env_prefix = ""
@@ -287,14 +452,30 @@ class InsertionSettings(BaseSettings):
     - Manages memory flushing behavior for durability
     - Sets timeouts to handle large insertion operations
     """
-    batch_size: int = Field(100, env="MILVUS_BATCH_SIZE",
-                           description="Number of vectors to insert in a single batch (higher = better throughput, more memory)")
-    validate_data: bool = Field(True, env="MILVUS_VALIDATE_DATA",
-                               description="Whether to validate vector dimensions and data types before insertion")
-    auto_flush: bool = Field(True, env="MILVUS_AUTO_FLUSH",
-                            description="Whether to automatically flush data to disk after insertion")
-    timeout: int = Field(60, env="MILVUS_INSERTION_TIMEOUT",
-                        description="Timeout in seconds for insertion operations")
+
+    batch_size: int = Field(
+        100,
+        env="MILVUS_BATCH_SIZE",
+        description=(
+            "Number of vectors to insert in a single batch "
+            "(higher = better throughput, more memory)"
+        ),
+    )
+    validate_data: bool = Field(
+        True,
+        env="MILVUS_VALIDATE_DATA",
+        description=("Whether to validate vector dimensions and data types " "before insertion"),
+    )
+    auto_flush: bool = Field(
+        True,
+        env="MILVUS_AUTO_FLUSH",
+        description=("Whether to automatically flush data to disk after insertion"),
+    )
+    timeout: int = Field(
+        60,
+        env="MILVUS_INSERTION_TIMEOUT",
+        description="Timeout in seconds for insertion operations",
+    )
 
     class Config:
         env_prefix = ""
@@ -311,14 +492,29 @@ class MonitoringSettings(BaseSettings):
     - Enables performance tracking for optimization
     - Sets intervals for metrics collection to balance overhead
     """
-    enable_metrics: bool = Field(True, env="MILVUS_ENABLE_METRICS",
-                                description="Whether to collect performance metrics for Milvus operations")
-    log_level: str = Field("INFO", env="MILVUS_LOG_LEVEL",
-                          description="Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)")
-    performance_tracking: bool = Field(True, env="MILVUS_PERFORMANCE_TRACKING",
-                                      description="Whether to track detailed performance metrics (latency, throughput, etc.)")
-    metrics_interval: int = Field(60, env="MILVUS_METRICS_INTERVAL",
-                                 description="Interval in seconds between metrics collection points")
+
+    enable_metrics: bool = Field(
+        True,
+        env="MILVUS_ENABLE_METRICS",
+        description=("Whether to collect performance metrics for Milvus operations"),
+    )
+    log_level: str = Field(
+        "INFO",
+        env="MILVUS_LOG_LEVEL",
+        description="Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)",
+    )
+    performance_tracking: bool = Field(
+        True,
+        env="MILVUS_PERFORMANCE_TRACKING",
+        description=(
+            "Whether to track detailed performance metrics " "(latency, throughput, etc.)"
+        ),
+    )
+    metrics_interval: int = Field(
+        60,
+        env="MILVUS_METRICS_INTERVAL",
+        description="Interval in seconds between metrics collection points",
+    )
 
     class Config:
         env_prefix = ""
@@ -335,12 +531,22 @@ class BackupSettings(BaseSettings):
     - Manages retention policy for backup history
     - Enables disaster recovery and point-in-time restore capabilities
     """
-    backup_path: str = Field("./backups", env="MILVUS_BACKUP_PATH",
-                            description="Directory path where backup files will be stored")
-    compression: bool = Field(True, env="MILVUS_BACKUP_COMPRESSION",
-                             description="Whether to compress backup files to save storage space")
-    retention_days: int = Field(30, env="MILVUS_BACKUP_RETENTION_DAYS",
-                               description="Number of days to retain backup files before automatic deletion")
+
+    backup_path: str = Field(
+        "./backups",
+        env="MILVUS_BACKUP_PATH",
+        description="Directory path where backup files will be stored",
+    )
+    compression: bool = Field(
+        True,
+        env="MILVUS_BACKUP_COMPRESSION",
+        description="Whether to compress backup files to save storage space",
+    )
+    retention_days: int = Field(
+        30,
+        env="MILVUS_BACKUP_RETENTION_DAYS",
+        description=("Number of days to retain backup files before automatic deletion"),
+    )
 
     class Config:
         env_prefix = ""
@@ -368,20 +574,28 @@ class MilvusSettings(BaseSettings):
         host = settings.connection.host
         batch_size = settings.insertion.batch_size
     """
-    connection: ConnectionSettings = Field(default_factory=ConnectionSettings,
-                                         description="Connection settings for Milvus server")
-    collection: CollectionSettings = Field(default_factory=CollectionSettings,
-                                         description="Collection configuration settings")
-    index: IndexSettings = Field(default_factory=IndexSettings,
-                               description="Index configuration for different index types")
-    search: SearchSettings = Field(default_factory=SearchSettings,
-                                 description="Search parameters and configuration")
-    insertion: InsertionSettings = Field(default_factory=InsertionSettings,
-                                       description="Data insertion settings and behavior")
-    monitoring: MonitoringSettings = Field(default_factory=MonitoringSettings,
-                                         description="Monitoring and metrics collection settings")
-    backup: BackupSettings = Field(default_factory=BackupSettings,
-                                 description="Backup and recovery configuration")
+
+    connection: ConnectionSettings = Field(
+        default_factory=ConnectionSettings, description="Connection settings for Milvus server"
+    )
+    collection: CollectionSettings = Field(
+        default_factory=CollectionSettings, description="Collection configuration settings"
+    )
+    index: IndexSettings = Field(
+        default_factory=IndexSettings, description="Index configuration for different index types"
+    )
+    search: SearchSettings = Field(
+        default_factory=SearchSettings, description="Search parameters and configuration"
+    )
+    insertion: InsertionSettings = Field(
+        default_factory=InsertionSettings, description="Data insertion settings and behavior"
+    )
+    monitoring: MonitoringSettings = Field(
+        default_factory=MonitoringSettings, description="Monitoring and metrics collection settings"
+    )
+    backup: BackupSettings = Field(
+        default_factory=BackupSettings, description="Backup and recovery configuration"
+    )
 
     class Config:
         env_prefix = ""
@@ -390,7 +604,7 @@ class MilvusSettings(BaseSettings):
         extra = "allow"  # Allow extra fields for usage_examples custom config sections
 
     @classmethod
-    def from_yaml(cls, yaml_file: Union[str, Path]) -> "MilvusSettings":
+    def from_yaml(cls, yaml_file: str | Path) -> "MilvusSettings":
         """
         Load settings from YAML file with YAML taking final authority.
 
@@ -398,13 +612,14 @@ class MilvusSettings(BaseSettings):
         that YAML configuration values take precedence over any environment variables.
         """
         import yaml
-        with open(yaml_file, 'r') as f:
+
+        with open(yaml_file) as f:
             data = yaml.safe_load(f)
 
         # Create instance from YAML data without env var overrides
         # by temporarily disabling env var reading
         env_backup = {}
-        env_keys = [key for key in os.environ.keys() if key.startswith('MILVUS_')]
+        env_keys = [key for key in os.environ if key.startswith("MILVUS_")]
         for key in env_keys:
             env_backup[key] = os.environ.pop(key)
 
@@ -417,7 +632,7 @@ class MilvusSettings(BaseSettings):
         return settings
 
 
-def load_settings(config_path: Optional[str] = None) -> MilvusSettings:
+def load_settings(config_path: str | None = None) -> MilvusSettings:
     """
     Load settings with auto-discovery support.
 
@@ -462,9 +677,9 @@ def load_settings(config_path: Optional[str] = None) -> MilvusSettings:
     caller_file = frame.f_code.co_filename if frame else None
 
     # Check if caller is in usage_examples directory
-    if caller_file and 'usage_examples' in caller_file:
+    if caller_file and "usage_examples" in caller_file:
         # Try usage_examples/config.yaml
-        usage_config = os.path.join(os.path.dirname(caller_file), '..', 'config.yaml')
+        usage_config = os.path.join(os.path.dirname(caller_file), "..", "config.yaml")
         usage_config = os.path.abspath(usage_config)
         if os.path.exists(usage_config):
             logger.info(f"Auto-discovered config: {usage_config}")
@@ -472,7 +687,7 @@ def load_settings(config_path: Optional[str] = None) -> MilvusSettings:
 
     # Try config/default_settings.yaml from project root
     project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    default_config = os.path.join(project_root, 'config', 'default_settings.yaml')
+    default_config = os.path.join(project_root, "config", "default_settings.yaml")
     if os.path.exists(default_config):
         logger.info(f"Loading default config: {default_config}")
         return MilvusSettings.from_yaml(default_config)
