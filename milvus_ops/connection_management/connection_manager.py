@@ -16,7 +16,6 @@ import time
 from typing import Any
 
 from config import MilvusSettings, load_settings
-from pymilvus import connections
 
 from milvus_ops.connection_management.circuit_breaker import (
     CircuitBreakerConfig,
@@ -111,9 +110,7 @@ class ConnectionManager:
                     self.config.connection, "circuit_breaker_max_half_open", 2
                 ),
             )
-            self._circuit_breaker = MilvusCircuitBreaker(
-                circuit_config, name="milvus_connection"
-            )
+            self._circuit_breaker = MilvusCircuitBreaker(circuit_config, name="milvus_connection")
             logger.info("ConnectionManager initialized with circuit breaker protection")
         else:
             logger.info("ConnectionManager initialized without circuit breaker")
@@ -127,9 +124,7 @@ class ConnectionManager:
         if max_rps > 0:
             burst_multiplier = self.config.connection.rate_limiter_burst_multiplier
             capacity = int(max_rps * burst_multiplier)
-            self._rate_limiter = TokenBucketRateLimiter(
-                rate=float(max_rps), capacity=capacity
-            )
+            self._rate_limiter = TokenBucketRateLimiter(rate=float(max_rps), capacity=capacity)
             logger.info(
                 f"ConnectionManager initialized with rate limiter: "
                 f"{max_rps} req/s, burst capacity: {capacity}"
@@ -228,9 +223,7 @@ class ConnectionManager:
                         jitter = backoff_time * 0.5
                         sleep_time = backoff_time + random.uniform(-jitter, jitter)
 
-                        logger.warning(
-                            f"Connection error: {e}. Retrying in {sleep_time:.2f}s..."
-                        )
+                        logger.warning(f"Connection error: {e}. Retrying in {sleep_time:.2f}s...")
                         time.sleep(sleep_time)
                     else:
                         logger.error(f"Max retries ({retry_count}) exceeded: {e}")
@@ -294,17 +287,61 @@ class ConnectionManager:
                     return future.result()
             except RuntimeError:
                 # No event loop running, safe to use asyncio.run
-                return asyncio.run(
-                    self._execute_with_circuit_breaker(operation, *args, **kwargs)
-                )
+                return asyncio.run(self._execute_with_circuit_breaker(operation, *args, **kwargs))
         else:
             # Execute without circuit breaker (legacy mode)
-            @self.with_retry
-            def _execute_operation_with_pool():
-                with self._pool.get_connection() as conn_alias:
-                    return operation(conn_alias, *args, **kwargs)
+            # Implement retry logic directly to avoid decorator issues with nested functions
+            retry_count = self.config.connection.retry_count
+            retry_interval = self.config.connection.retry_interval or 0.1  # Default to 0.1 if None
+            last_exception = None
 
-            return _execute_operation_with_pool()
+            for attempt in range(retry_count + 1):
+                try:
+                    if attempt > 0:
+                        logger.info(f"Retry attempt {attempt}/{retry_count}")
+
+                    with self._pool.get_connection() as conn_alias:
+                        result = operation(conn_alias, *args, **kwargs)
+
+                    # PRODUCTION FIX: Record success in retry budget
+                    if self._retry_budget:
+                        self._retry_budget.record_attempt(success=True)
+
+                    return result
+
+                except ConnectionError as e:
+                    last_exception = e
+
+                    # PRODUCTION FIX: Record failure and check retry budget
+                    if self._retry_budget:
+                        retry_allowed = self._retry_budget.record_attempt(success=False)
+                        if not retry_allowed and attempt < retry_count:
+                            logger.error(
+                                "Retry budget exhausted - denying retry to prevent retry storm. "
+                                "Success rate too low."
+                            )
+                            # Don't retry if budget is exhausted
+                            break
+
+                    if attempt < retry_count:
+                        # Exponential backoff with jitter
+                        backoff_time = retry_interval * (2**attempt)
+                        jitter = backoff_time * 0.5
+                        sleep_time = backoff_time + random.uniform(-jitter, jitter)
+
+                        logger.warning(f"Connection error: {e}. Retrying in {sleep_time:.2f}s...")
+                        time.sleep(sleep_time)
+                    else:
+                        logger.error(f"Max retries ({retry_count}) exceeded: {e}")
+                        break
+
+            # Safety check: ensure last_exception is set
+            if last_exception is None:
+                last_exception = ConnectionError("Unknown error during retry attempts")
+
+            raise MaxRetriesExceededError(
+                f"Operation failed after {retry_count} retries"
+            ) from last_exception
 
     async def _execute_with_circuit_breaker(
         self, operation: Callable, timeout: float | None = None, *args, **kwargs
@@ -330,12 +367,8 @@ class ConnectionManager:
         """
         # First check if server is responsive
         if not self.check_server_status():
-            logger.error(
-                "Server health check failed - server appears to be unavailable"
-            )
-            raise ServerUnavailableError(
-                "Milvus server is not responding to health checks"
-            )
+            logger.error("Server health check failed - server appears to be unavailable")
+            raise ServerUnavailableError("Milvus server is not responding to health checks")
 
         async def _protected_operation():
             @self.with_retry
@@ -358,9 +391,7 @@ class ConnectionManager:
                 except ConnectionError as e:
                     # Add context about server state
                     if not self.check_server_status():
-                        raise ServerUnavailableError(
-                            f"Server became unavailable: {e}"
-                        ) from e
+                        raise ServerUnavailableError(f"Server became unavailable: {e}") from e
                     raise
 
             # PRODUCTION FIX: Enforce operation-level timeout
@@ -373,9 +404,7 @@ class ConnectionManager:
                 try:
                     # Use asyncio.wait_for to enforce timeout on the executor task
                     result = await asyncio.wait_for(
-                        loop.run_in_executor(
-                            self._executor, _execute_operation_with_pool
-                        ),
+                        loop.run_in_executor(self._executor, _execute_operation_with_pool),
                         timeout=timeout,
                     )
                     return result
@@ -387,14 +416,10 @@ class ConnectionManager:
                     ) from None
             else:
                 # No timeout specified, execute without time limit
-                return await loop.run_in_executor(
-                    self._executor, _execute_operation_with_pool
-                )
+                return await loop.run_in_executor(self._executor, _execute_operation_with_pool)
 
         try:
-            return await self._circuit_breaker.execute_milvus_operation(
-                _protected_operation
-            )
+            return await self._circuit_breaker.execute_milvus_operation(_protected_operation)
         except Exception as e:
             # Final check - if server is down, make that clear in the error
             if not self.check_server_status():
@@ -453,9 +478,7 @@ class ConnectionManager:
 
         if self._circuit_breaker:
             # Execute with circuit breaker protection (already async)
-            return await self._execute_with_circuit_breaker(
-                operation, timeout, *args, **kwargs
-            )
+            return await self._execute_with_circuit_breaker(operation, timeout, *args, **kwargs)
         else:
             # Execute without circuit breaker (legacy async mode)
             @self.with_retry
@@ -472,9 +495,7 @@ class ConnectionManager:
                 try:
                     # Use asyncio.wait_for to enforce timeout on the executor task
                     result = await asyncio.wait_for(
-                        loop.run_in_executor(
-                            self._executor, _execute_operation_with_pool_async
-                        ),
+                        loop.run_in_executor(self._executor, _execute_operation_with_pool_async),
                         timeout=timeout,
                     )
                     return result
@@ -514,11 +535,11 @@ class ConnectionManager:
         pool has available connections.
         """
         try:
-            with self._pool.get_connection() as conn_alias:
-                # Simple ping to check if server is responsive
-                # This assumes Milvus has a utility function or endpoint for checking status
-                # Adjust as needed based on the actual Milvus Python SDK capabilities
-                return connections.has_connection(conn_alias)
+            with self._pool.get_connection():
+                # Simple check - if we can acquire a connection from the pool,
+                # consider the server available. The actual server connectivity
+                # will be verified during operation execution.
+                return True
         except ConnectionError:
             return False
 
@@ -612,21 +633,15 @@ class ConnectionManager:
         # PRODUCTION SCALABILITY FIX: Clean up the dedicated ThreadPoolExecutor
         if hasattr(self, "_executor"):
             self._executor.shutdown(wait=True)
-            logger.debug(
-                f"Shut down ThreadPoolExecutor for ConnectionManager {id(self)}"
-            )
+            logger.debug(f"Shut down ThreadPoolExecutor for ConnectionManager {id(self)}")
 
         if hasattr(self, "_pool"):
             # Use reference counting instead of directly closing the pool
             pool_closed = self._pool.release_reference()
             if pool_closed:
-                logger.info(
-                    "ConnectionManager closed and pool was shut down (last reference)"
-                )
+                logger.info("ConnectionManager closed and pool was shut down (last reference)")
             else:
-                logger.info(
-                    "ConnectionManager closed (pool still in use by other managers)"
-                )
+                logger.info("ConnectionManager closed (pool still in use by other managers)")
         else:
             logger.info("ConnectionManager closed (no pool to release)")
 

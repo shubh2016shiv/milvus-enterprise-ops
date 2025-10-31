@@ -10,11 +10,12 @@ import logging
 import queue
 import threading
 
-from config import MilvusSettings
+from config import MilvusSettings, load_settings
 from pymilvus import connections
 
 from milvus_ops.connection_management.connection_exceptions import (
     ConnectionClosedError,
+    ConnectionError,
     ConnectionInitializationError,
     ConnectionPoolExhaustedError,
 )
@@ -75,9 +76,7 @@ class MilvusConnectionPool:
                     import os
                     import sys
 
-                    root_dir = os.path.dirname(
-                        os.path.dirname(os.path.abspath(__file__))
-                    )
+                    root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
                     if root_dir not in sys.path:
                         sys.path.insert(0, root_dir)
                     from milvus_ops.milvus_ops_exceptions import ConfigurationError
@@ -88,15 +87,13 @@ class MilvusConnectionPool:
                     )
                 return
 
-            self.config = config
+            self.config = config if config is not None else load_settings()
             self._available_connections = queue.Queue()
             self._in_use_connections = set()
             self._initialized = True
             self._closed = False
             self._connection_count = 0
-            self._reference_count = (
-                0  # Track how many ConnectionManagers are using this pool
-            )
+            self._reference_count = 0  # Track how many ConnectionManagers are using this pool
 
             # Initialize the pool
             self._initialize_pool()
@@ -130,9 +127,7 @@ class MilvusConnectionPool:
                 self._connection_count += 1
         except Exception as e:
             logger.error(f"Failed to initialize connection pool: {e}")
-            raise ConnectionInitializationError(
-                f"Failed to initialize connection pool: {e}"
-            ) from e
+            raise ConnectionInitializationError(f"Failed to initialize connection pool: {e}") from e
 
     def _create_connection(self, alias: str):
         """
@@ -230,9 +225,7 @@ class MilvusConnectionPool:
 
             # Check if connection is healthy
             if not self._is_connection_healthy(conn_alias):
-                logger.warning(
-                    f"Stale connection {conn_alias} detected, attempting to reconnect."
-                )
+                logger.warning(f"Stale connection {conn_alias} detected, attempting to reconnect.")
                 try:
                     connections.disconnect(alias=conn_alias)
                     self._create_connection(conn_alias)
@@ -240,9 +233,7 @@ class MilvusConnectionPool:
                     logger.error(f"Failed to recreate connection {conn_alias}: {e}")
                     # Put it back and let another thread try
                     self._available_connections.put(conn_alias)
-                    raise ConnectionError(
-                        f"Failed to restore connection {conn_alias}"
-                    ) from e
+                    raise ConnectionError(f"Failed to restore connection {conn_alias}") from e
 
             with self._lock:
                 self._in_use_connections.add(conn_alias)
@@ -297,9 +288,7 @@ class MilvusConnectionPool:
                             )
                         except Exception as e:
                             # Failed to recreate connection - this is serious
-                            logger.error(
-                                f"Failed to recreate connection {conn_alias}: {e}"
-                            )
+                            logger.error(f"Failed to recreate connection {conn_alias}: {e}")
                             # Don't return the connection to the pool - pool size is now
                             # reduced by 1
                             # This should trigger monitoring alerts for degraded pool capacity
@@ -312,9 +301,7 @@ class MilvusConnectionPool:
                     # If pool is closed, actually close this connection
                     try:
                         connections.disconnect(alias=conn_alias)
-                        logger.info(
-                            f"Connection {conn_alias} closed (pool is shutting down)"
-                        )
+                        logger.info(f"Connection {conn_alias} closed (pool is shutting down)")
                     except Exception:
                         pass
 

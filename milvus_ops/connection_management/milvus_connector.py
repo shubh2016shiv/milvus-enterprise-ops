@@ -12,7 +12,7 @@ from enum import Enum
 import logging
 import uuid
 
-from config import MilvusSettings
+from config import MilvusSettings, load_settings
 
 from milvus_ops.connection_management.connection_exceptions import (
     ConnectionError,
@@ -105,23 +105,17 @@ class MilvusConnector:
             ConnectionFeedback: Detailed feedback on the connection attempt.
         """
         milvus_connection_id = f"milvus-conn-{uuid.uuid4()}"
-        logger.info(
-            f"[{milvus_connection_id}] Attempting to establish Milvus connection..."
-        )
+        logger.info(f"[{milvus_connection_id}] Attempting to establish Milvus connection...")
 
         try:
             # Initialize the connection manager, which creates the pool
-            self._connection_manager = ConnectionManager(
-                self.config, self.enable_circuit_breaker
-            )
+            self._connection_manager = ConnectionManager(self.config, self.enable_circuit_breaker)
 
             # Check server status to confirm connectivity
             is_available = self._connection_manager.check_server_status()
 
             if is_available:
-                logger.info(
-                    f"[{milvus_connection_id}] Milvus connection established successfully."
-                )
+                logger.info(f"[{milvus_connection_id}] Milvus connection established successfully.")
                 return ConnectionFeedback(
                     milvus_connection_id=milvus_connection_id,
                     status=ConnectionStatus.SUCCESS,
@@ -270,15 +264,11 @@ if __name__ == "__main__":
                 print("\nCircuit Breaker Metrics:")
                 print(f"  State: {metrics['state']}")
                 print(f"  Total Requests: {metrics['counters']['total_requests']}")
-                print(
-                    f"  Success Rate: {metrics['current_state']['success_rate_percent']}%"
-                )
+                print(f"  Success Rate: {metrics['current_state']['success_rate_percent']}%")
         except Exception as e:
             print(f"Operation failed: {e}")
     else:
-        print(
-            "\nFailed to connect to Milvus server. Check your configuration and server status."
-        )
+        print("\nFailed to connect to Milvus server. Check your configuration and server status.")
 
     # Clean up resources
     print("\nClosing connection...")
