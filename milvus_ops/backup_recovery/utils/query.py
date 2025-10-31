@@ -6,7 +6,6 @@ different Milvus versions and configurations.
 """
 
 import logging
-from typing import Optional
 
 from pymilvus import Collection, DataType
 
@@ -53,7 +52,12 @@ def generate_query_expression(collection: Collection) -> str:
     field_name = primary_field.name
 
     # Handle different data types
-    if primary_field.dtype in [DataType.INT64, DataType.INT32, DataType.INT16, DataType.INT8]:
+    if primary_field.dtype in [
+        DataType.INT64,
+        DataType.INT32,
+        DataType.INT16,
+        DataType.INT8,
+    ]:
         # Integer types
         return f"{field_name} >= 0"
     elif primary_field.dtype in [DataType.VARCHAR, DataType.STRING]:
@@ -67,5 +71,7 @@ def generate_query_expression(collection: Collection) -> str:
         return f"{field_name} >= 0 or {field_name} < 0"  # Gets all non-NaN values
     else:
         # Fallback for other types
-        logger.warning(f"Unsupported primary key type {primary_field.dtype}, using generic expression")
+        logger.warning(
+            f"Unsupported primary key type {primary_field.dtype}, using generic expression"
+        )
         return f"{field_name} is not null"

@@ -23,36 +23,70 @@ Typical usage from external projects:
         BackupStorageType,
         ChecksumCalculator
     )
-    
+
     # Create configuration
     config = BackupRecoveryConfig(
         local_backup_root_path="/mnt/backups",
         compression_enabled=True,
         retention_count=20
     )
-    
+
     # Create backup parameters
     params = BackupParams(
         backup_type=BackupType.FULL_COLLECTION,
         compression_enabled=True
     )
-    
+
     # Use with backup manager (when implemented)
     # backup_manager = BackupManager(conn_mgr, coll_mgr, config=config)
     # result = await backup_manager.create_backup("documents", params)
 """
 
-# Try to import pyarrow for Parquet support
-try:
-    import pyarrow
-    PARQUET_AVAILABLE = True
-except ImportError:
-    PARQUET_AVAILABLE = False
-    import logging
-    logging.warning("pyarrow not available, backup functionality will be limited")
+import importlib.util
+import logging
 
-# Configuration
 from .config import BackupRecoveryConfig
+from .exceptions import (
+    BackupAlreadyExistsError,
+    BackupCorruptedError,
+    BackupError,
+    BackupInProgressError,
+    BackupNotFoundError,
+    BackupRecoveryError,
+    BackupStorageError,
+    InsufficientStorageError,
+    PartitionNotFoundError,
+    RestoreError,
+    RestoreValidationError,
+    SchemaIncompatibleError,
+)
+from .models.entities import (
+    BackupMetadata,
+    BackupProgress,
+    BackupResult,
+    BackupState,
+    BackupStorageType,
+    BackupType,
+    BackupVersion,
+    ChecksumAlgorithm,
+    RestoreResult,
+    VerificationResult,
+    VerificationType,
+)
+from .models.parameters import BackupParams, RestoreParams, VerificationParams
+from .utils import (
+    BackupProgressTracker,
+    BackupProgressTrackerRegistry,
+    ChecksumCalculator,
+    CompressionHandler,
+    RetentionPolicyManager,
+    get_registry,
+)
+
+# Try to import pyarrow for Parquet support
+PARQUET_AVAILABLE = importlib.util.find_spec("pyarrow") is not None
+if not PARQUET_AVAILABLE:
+    logging.warning("pyarrow not available, backup functionality will be limited")
 
 # Core manager or mock implementation
 if PARQUET_AVAILABLE:
@@ -60,103 +94,46 @@ if PARQUET_AVAILABLE:
 else:
     from .mock_backend import MockBackupManager as BackupManager
 
-# Models
-from .models.entities import (
-    BackupState,
-    BackupType,
-    BackupStorageType,
-    ChecksumAlgorithm,
-    VerificationType,
-    BackupMetadata,
-    BackupResult,
-    RestoreResult,
-    BackupProgress,
-    VerificationResult,
-    BackupVersion
-)
-
-from .models.parameters import (
-    BackupParams,
-    RestoreParams,
-    VerificationParams
-)
-
-# Make RestoreParams available at the top level for convenience
-from .models.parameters import RestoreParams
-
-# Exceptions
-from .exceptions import (
-    BackupRecoveryError,
-    BackupError,
-    RestoreError,
-    BackupNotFoundError,
-    BackupCorruptedError,
-    BackupStorageError,
-    BackupAlreadyExistsError,
-    RestoreValidationError,
-    InsufficientStorageError,
-    BackupInProgressError,
-    PartitionNotFoundError,
-    SchemaIncompatibleError
-)
-
-# Utilities
-from .utils import (
-    ChecksumCalculator,
-    CompressionHandler,
-    BackupProgressTracker,
-    BackupProgressTrackerRegistry,
-    get_registry,
-    RetentionPolicyManager
-)
-
 __all__ = [
     # Core manager
-    'BackupManager',
-    
+    "BackupManager",
     # Configuration
-    'BackupRecoveryConfig',
-    
+    "BackupRecoveryConfig",
     # Enums
-    'BackupState',
-    'BackupType',
-    'BackupStorageType',
-    'ChecksumAlgorithm',
-    'VerificationType',
-    
+    "BackupState",
+    "BackupType",
+    "BackupStorageType",
+    "ChecksumAlgorithm",
+    "VerificationType",
     # Entities
-    'BackupMetadata',
-    'BackupResult',
-    'RestoreResult',
-    'BackupProgress',
-    'VerificationResult',
-    'BackupVersion',
-    
+    "BackupMetadata",
+    "BackupResult",
+    "RestoreResult",
+    "BackupProgress",
+    "VerificationResult",
+    "BackupVersion",
     # Parameters
-    'BackupParams',
-    'RestoreParams',
-    'VerificationParams',
-    
+    "BackupParams",
+    "RestoreParams",
+    "VerificationParams",
     # Exceptions
-    'BackupRecoveryError',
-    'BackupError',
-    'RestoreError',
-    'BackupNotFoundError',
-    'BackupCorruptedError',
-    'BackupStorageError',
-    'BackupAlreadyExistsError',
-    'RestoreValidationError',
-    'InsufficientStorageError',
-    'BackupInProgressError',
-    'PartitionNotFoundError',
-    'SchemaIncompatibleError',
-    
+    "BackupRecoveryError",
+    "BackupError",
+    "RestoreError",
+    "BackupNotFoundError",
+    "BackupCorruptedError",
+    "BackupStorageError",
+    "BackupAlreadyExistsError",
+    "RestoreValidationError",
+    "InsufficientStorageError",
+    "BackupInProgressError",
+    "PartitionNotFoundError",
+    "SchemaIncompatibleError",
     # Utilities
-    'ChecksumCalculator',
-    'CompressionHandler',
-    'BackupProgressTracker',
-    'BackupProgressTrackerRegistry',
-    'get_registry',
-    'RetentionPolicyManager'
+    "ChecksumCalculator",
+    "CompressionHandler",
+    "BackupProgressTracker",
+    "BackupProgressTrackerRegistry",
+    "get_registry",
+    "RetentionPolicyManager",
 ]
-

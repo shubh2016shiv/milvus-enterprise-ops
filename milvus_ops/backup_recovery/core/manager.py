@@ -6,29 +6,27 @@ for multiple storage backends and comprehensive validation.
 """
 
 import asyncio
-import logging
 from datetime import datetime
-from typing import Optional, List, Dict, Any
+import logging
+from typing import Any
 
 from pymilvus import Collection
 
-from milvus_ops.connection_management import ConnectionManager
 from milvus_ops.collection_operations import CollectionManager
+from milvus_ops.connection_management import ConnectionManager
+
 from ..config import BackupRecoveryConfig
+from ..exceptions import BackupNotFoundError, RestoreError
 from ..models.entities import (
     BackupMetadata,
     BackupResult,
-    RestoreResult,
-    BackupStorageType,
     BackupState,
+    BackupStorageType,
+    BackupVersion,
+    RestoreResult,
     VerificationResult,
-    BackupVersion
 )
 from ..models.parameters import BackupParams, RestoreParams, VerificationParams
-from ..exceptions import (
-    RestoreError,
-    BackupNotFoundError
-)
 from ..utils.progress import get_registry
 from ..utils.retention import RetentionPolicyManager
 from .local_backend import LocalBackupBackend
@@ -41,11 +39,11 @@ logger = logging.getLogger(__name__)
 class BackupManager:
     """
     Manages backup and restore operations for Milvus collections.
-    
+
     This is the main entry point for all backup operations, providing a unified
     interface for creating, restoring, verifying, and managing backups across
     different storage backends.
-    
+
     Example:
         ```python
         manager = BackupManager(
@@ -53,16 +51,16 @@ class BackupManager:
             collection_manager=coll_mgr,
             config=BackupRecoveryConfig()
         )
-        
+
         # Create backup
         result = await manager.create_backup(
             collection_name="documents",
             params=BackupParams()
         )
-        
+
         # List backups
         backups = await manager.list_backups(collection_name="documents")
-        
+
         # Restore backup
         result = await manager.restore_backup(
             backup_id="backup_123",
@@ -70,16 +68,16 @@ class BackupManager:
         )
         ```
     """
-    
+
     def __init__(
         self,
         connection_manager: ConnectionManager,
         collection_manager: CollectionManager,
-        config: Optional[BackupRecoveryConfig] = None
+        config: BackupRecoveryConfig | None = None,
     ):
         """
         Initialize BackupManager.
-        
+
         Args:
             connection_manager: Manages Milvus connections
             collection_manager: Handles collection operations
@@ -88,46 +86,46 @@ class BackupManager:
         self._connection_manager = connection_manager
         self._collection_manager = collection_manager
         self._config = config or BackupRecoveryConfig()
-        
+
         # Initialize backends
         self._local_backend = LocalBackupBackend(self._config)
         self._milvus_backend = MilvusNativeBackupBackend(self._config)
-        
+
         # Initialize utilities
         self._validator = BackupValidator(self._config)
         self._retention_manager = RetentionPolicyManager(
             retention_count=self._config.retention_count,
             retention_days=self._config.retention_days,
-            min_backups_to_keep=self._config.min_backups_to_keep
+            min_backups_to_keep=self._config.min_backups_to_keep,
         )
-        
+
         # Progress tracking
         self._tracker_registry = get_registry()
-        
+
         # Locks for thread safety
-        self._locks: Dict[str, asyncio.Lock] = {}
+        self._locks: dict[str, asyncio.Lock] = {}
         self._global_lock = asyncio.Lock()
-        
+
         logger.info("BackupManager initialized")
-    
+
     async def _acquire_collection_lock(self, collection_name: str) -> asyncio.Lock:
         """Acquire lock for a specific collection."""
         async with self._global_lock:
             if collection_name not in self._locks:
                 self._locks[collection_name] = asyncio.Lock()
             return self._locks[collection_name]
-    
-    def _get_backend(self, storage_type: Optional[BackupStorageType] = None):
+
+    def _get_backend(self, storage_type: BackupStorageType | None = None):
         """Get appropriate storage backend."""
         storage_type = storage_type or self._config.default_storage_type
-        
+
         if storage_type == BackupStorageType.LOCAL_FILE:
             return self._local_backend
         elif storage_type == BackupStorageType.MILVUS_NATIVE:
             return self._milvus_backend
         else:
             raise ValueError(f"Unsupported storage type: {storage_type}")
-    
+
     def _generate_backup_id(self) -> str:
         """Generate unique backup identifier.
 
@@ -137,6 +135,7 @@ class BackupManager:
         For uniqueness, we use microsecond precision in the timestamp.
         """
         from datetime import datetime
+
         now = datetime.now()
 
         # Format with microsecond precision to ensure uniqueness
@@ -148,9 +147,9 @@ class BackupManager:
     async def create_backup(
         self,
         collection_name: str,
-        params: Optional[BackupParams] = None,
-        storage_type: Optional[BackupStorageType] = None,
-        wait: bool = False
+        params: BackupParams | None = None,
+        storage_type: BackupStorageType | None = None,
+        wait: bool = False,
     ) -> BackupResult:
         """
         Create a backup of a collection.
@@ -193,7 +192,7 @@ class BackupManager:
                 tracker = self._tracker_registry.register_backup(
                     backup_id=backup_id,
                     collection_name=collection_name,
-                    total_bytes=estimated_size
+                    total_bytes=estimated_size,
                 )
 
                 # Get backend
@@ -210,7 +209,7 @@ class BackupManager:
                     params=params,
                     backup_id=backup_id,
                     backup_name=params.backup_name,
-                    progress_tracker=tracker
+                    progress_tracker=tracker,
                 )
                 return metadata
 
@@ -238,7 +237,7 @@ class BackupManager:
                 size_bytes=metadata.size_bytes,
                 execution_time_ms=execution_time_ms,
                 state=metadata.state,
-                metadata=metadata
+                metadata=metadata,
             )
 
         except Exception as e:
@@ -253,15 +252,15 @@ class BackupManager:
                 storage_type=storage_type or self._config.default_storage_type,
                 execution_time_ms=execution_time_ms,
                 state=BackupState.FAILED,
-                error_message=str(e)
+                error_message=str(e),
             )
 
     async def restore_backup(
         self,
         backup_id: str,
         collection_name: str,
-        params: Optional[RestoreParams] = None,
-        storage_type: Optional[BackupStorageType] = None
+        params: RestoreParams | None = None,
+        storage_type: BackupStorageType | None = None,
     ) -> RestoreResult:
         """
         Restore a backup.
@@ -285,10 +284,7 @@ class BackupManager:
             # Get backup metadata
             metadata = await backend.get_backup_metadata(collection_name, backup_id)
             if not metadata:
-                raise BackupNotFoundError(
-                    f"Backup not found: {backup_id}",
-                    backup_id=backup_id
-                )
+                raise BackupNotFoundError(f"Backup not found: {backup_id}", backup_id=backup_id)
 
             # Validate parameters
             self._validator.validate_restore_params(params)
@@ -299,7 +295,7 @@ class BackupManager:
                 if not verification.success:
                     raise RestoreError(
                         f"Backup verification failed: {verification.errors}",
-                        backup_id=backup_id
+                        backup_id=backup_id,
                     )
 
             logger.info(f"Restoring backup {backup_id}")
@@ -316,7 +312,7 @@ class BackupManager:
                 target_collection_name=params.target_collection_name or collection_name,
                 rows_restored=metadata.row_count,
                 execution_time_ms=execution_time_ms,
-                verification_passed=True
+                verification_passed=True,
             )
 
         except Exception as e:
@@ -327,16 +323,18 @@ class BackupManager:
                 success=False,
                 backup_id=backup_id,
                 source_collection_name=collection_name,
-                target_collection_name=params.target_collection_name or collection_name if params else collection_name,
+                target_collection_name=params.target_collection_name or collection_name
+                if params
+                else collection_name,
                 execution_time_ms=execution_time_ms,
-                error_message=str(e)
+                error_message=str(e),
             )
 
     async def list_backups(
         self,
-        collection_name: Optional[str] = None,
-        storage_type: Optional[BackupStorageType] = None
-    ) -> List[BackupMetadata]:
+        collection_name: str | None = None,
+        storage_type: BackupStorageType | None = None,
+    ) -> list[BackupMetadata]:
         """
         List available backups.
 
@@ -362,8 +360,8 @@ class BackupManager:
         self,
         backup_id: str,
         collection_name: str,
-        storage_type: Optional[BackupStorageType] = None
-    ) -> Optional[BackupMetadata]:
+        storage_type: BackupStorageType | None = None,
+    ) -> BackupMetadata | None:
         """
         Get detailed backup information.
 
@@ -386,7 +384,7 @@ class BackupManager:
         self,
         backup_id: str,
         collection_name: str,
-        storage_type: Optional[BackupStorageType] = None
+        storage_type: BackupStorageType | None = None,
     ) -> bool:
         """
         Delete a backup.
@@ -416,8 +414,8 @@ class BackupManager:
         self,
         backup_id: str,
         collection_name: str,
-        storage_type: Optional[BackupStorageType] = None,
-        params: Optional[VerificationParams] = None
+        storage_type: BackupStorageType | None = None,
+        params: VerificationParams | None = None,
     ) -> VerificationResult:
         """
         Verify backup integrity.
@@ -450,7 +448,7 @@ class BackupManager:
                 files_verified=1,  # Simplified
                 files_failed=0 if is_valid else 1,
                 verification_time_ms=execution_time_ms,
-                verified_at=datetime.now()
+                verified_at=datetime.now(),
             )
 
         except Exception as e:
@@ -466,15 +464,15 @@ class BackupManager:
                 files_failed=1,
                 errors=[str(e)],
                 verification_time_ms=execution_time_ms,
-                verified_at=datetime.now()
+                verified_at=datetime.now(),
             )
 
     async def apply_retention_policy(
         self,
-        collection_name: Optional[str] = None,
-        storage_type: Optional[BackupStorageType] = None,
-        dry_run: bool = False
-    ) -> Dict[str, Any]:
+        collection_name: str | None = None,
+        storage_type: BackupStorageType | None = None,
+        dry_run: bool = False,
+    ) -> dict[str, Any]:
         """
         Apply retention policy and clean up old backups.
 
@@ -498,7 +496,7 @@ class BackupManager:
                     collection_name=b.collection_name,
                     created_at=b.created_at,
                     size_bytes=b.size_bytes,
-                    is_verified=b.is_verified
+                    is_verified=b.is_verified,
                 )
                 for b in backups
             ]
@@ -514,7 +512,7 @@ class BackupManager:
                 "backups_to_keep": len(to_keep),
                 "backups_to_delete": len(to_delete),
                 "storage_to_free_gb": storage_gb,
-                "deleted_backup_ids": []
+                "deleted_backup_ids": [],
             }
 
             # Delete if not dry run
@@ -523,19 +521,18 @@ class BackupManager:
                     success = self.delete_backup(
                         backup_version.backup_id,
                         backup_version.collection_name,
-                        storage_type
+                        storage_type,
                     )
                     if success:
                         result["deleted_backup_ids"].append(backup_version.backup_id)
-            
+
             logger.info(
                 f"Retention policy applied: {len(to_delete)} backups to delete, "
                 f"{storage_gb:.2f} GB to free"
             )
-            
+
             return result
-            
+
         except Exception as e:
             logger.error(f"Failed to apply retention policy: {e}")
             return {"error": str(e)}
-

@@ -5,22 +5,21 @@ Provides validation for backup parameters, storage space, and backup integrity.
 """
 
 import logging
-import shutil
 from pathlib import Path
-from typing import Optional, List, Dict, Any
+import shutil
+from typing import Any
 
 from pymilvus import Collection, utility
 from pymilvus.exceptions import MilvusException
 
 from ..config import BackupRecoveryConfig
-from ..models.parameters import BackupParams, RestoreParams
-from ..models.entities import BackupMetadata
 from ..exceptions import (
-    RestoreValidationError,
     InsufficientStorageError,
     PartitionNotFoundError,
-    SchemaIncompatibleError
+    SchemaIncompatibleError,
 )
+from ..models.entities import BackupMetadata
+from ..models.parameters import BackupParams, RestoreParams
 
 logger = logging.getLogger(__name__)
 
@@ -28,51 +27,47 @@ logger = logging.getLogger(__name__)
 class BackupValidator:
     """
     Validator for backup operations.
-    
+
     Provides validation methods for:
     - Backup parameters before creation
     - Storage space availability
     - Partition existence
     - Schema compatibility for restore
     - Backup integrity
-    
+
     Example:
         ```python
         validator = BackupValidator(config)
-        
+
         # Validate backup parameters
         validator.validate_backup_params(collection, params)
-        
+
         # Check storage space
         validator.validate_storage_space(required_bytes=1000000000)
-        
+
         # Validate restore compatibility
         validator.validate_schema_compatibility(backup_metadata, target_collection)
         ```
     """
-    
+
     def __init__(self, config: BackupRecoveryConfig):
         """
         Initialize backup validator.
-        
+
         Args:
             config: Backup recovery configuration
         """
         self.config = config
         logger.debug("BackupValidator initialized")
-    
-    def validate_backup_params(
-        self,
-        collection: Collection,
-        params: BackupParams
-    ) -> None:
+
+    def validate_backup_params(self, collection: Collection, params: BackupParams) -> None:
         """
         Validate backup parameters before creating backup.
-        
+
         Args:
             collection: Collection to backup
             params: Backup parameters
-        
+
         Raises:
             ValueError: If parameters are invalid
             PartitionNotFoundError: If specified partitions don't exist
@@ -81,49 +76,51 @@ class BackupValidator:
         if params.is_partition_backup:
             if not params.partition_names:
                 raise ValueError("partition_names must be provided for PARTITION backup")
-            
+
             self.validate_partition_names(collection, params.partition_names)
-        
+
         # Validate compression level
         if not 1 <= params.compression_level <= 9:
-            raise ValueError(f"compression_level must be between 1 and 9, got {params.compression_level}")
-        
+            raise ValueError(
+                f"compression_level must be between 1 and 9, got {params.compression_level}"
+            )
+
         # Validate chunk size
         if params.chunk_size_mb <= 0:
             raise ValueError(f"chunk_size_mb must be positive, got {params.chunk_size_mb}")
-        
+
         logger.debug(f"Backup parameters validated for collection '{collection.name}'")
-    
+
     def validate_restore_params(self, params: RestoreParams) -> None:
         """
         Validate restore parameters.
-        
+
         Args:
             params: Restore parameters
-        
+
         Raises:
             ValueError: If parameters are invalid
         """
         # Basic validation
         if params.target_collection_name and not params.target_collection_name.strip():
             raise ValueError("target_collection_name cannot be empty")
-        
+
         logger.debug("Restore parameters validated")
-    
+
     def validate_collection_state(self, collection: Collection) -> None:
         """
         Ensure collection is in valid state for backup.
-        
+
         Args:
             collection: Collection to check
-        
+
         Raises:
             ValueError: If collection state is invalid
         """
         try:
             # CRITICAL FIX: Use the collection's connection alias for utility calls
             # The connection pool uses aliases like "conn_0", not "default"
-            using_alias = collection._using if hasattr(collection, '_using') else "default"
+            using_alias = collection._using if hasattr(collection, "_using") else "default"
 
             # Check if collection exists using the same connection
             if not utility.has_collection(collection.name, using=using_alias):
@@ -131,16 +128,14 @@ class BackupValidator:
 
             # Check if collection has data
             stats = collection.num_entities
-            logger.debug(f"Collection '{collection.name}' has {stats} entities (using alias '{using_alias}')")
+            logger.debug(
+                f"Collection '{collection.name}' has {stats} entities (using alias '{using_alias}')"
+            )
 
         except MilvusException as e:
-            raise ValueError(f"Failed to validate collection state: {e}")
+            raise ValueError(f"Failed to validate collection state: {e}") from e
 
-    def validate_storage_space(
-        self,
-        required_bytes: int,
-        storage_path: Optional[Path] = None
-    ) -> None:
+    def validate_storage_space(self, required_bytes: int, storage_path: Path | None = None) -> None:
         """
         Check if sufficient disk space is available.
 
@@ -164,7 +159,7 @@ class BackupValidator:
                     f"available {available_bytes / (1024**3):.2f} GB",
                     required_bytes=required_bytes,
                     available_bytes=available_bytes,
-                    storage_path=str(storage_path)
+                    storage_path=str(storage_path),
                 )
 
             logger.debug(
@@ -176,11 +171,7 @@ class BackupValidator:
             logger.warning(f"Failed to check disk space: {e}")
             # Don't fail the operation, just log warning
 
-    def validate_partition_names(
-        self,
-        collection: Collection,
-        partition_names: List[str]
-    ) -> None:
+    def validate_partition_names(self, collection: Collection, partition_names: list[str]) -> None:
         """
         Verify that specified partitions exist in collection.
 
@@ -193,7 +184,7 @@ class BackupValidator:
         """
         try:
             # CRITICAL FIX: Use the collection's connection alias for utility calls
-            using_alias = collection._using if hasattr(collection, '_using') else "default"
+            using_alias = collection._using if hasattr(collection, "_using") else "default"
             logger.debug(f"Validating partitions using connection alias: {using_alias}")
 
             # Get existing partitions using the same connection
@@ -202,9 +193,8 @@ class BackupValidator:
             except Exception as e:
                 logger.error(f"Failed to get partitions: {e}")
                 raise PartitionNotFoundError(
-                    f"Failed to get partitions: {e}",
-                    collection_name=collection.name
-                )
+                    f"Failed to get partitions: {e}", collection_name=collection.name
+                ) from e
 
             for partition_name in partition_names:
                 if partition_name not in existing_partitions:
@@ -212,21 +202,20 @@ class BackupValidator:
                         f"Partition '{partition_name}' not found in collection '{collection.name}'",
                         collection_name=collection.name,
                         partition_name=partition_name,
-                        available_partitions=existing_partitions
+                        available_partitions=existing_partitions,
                     )
 
             logger.debug(f"All {len(partition_names)} partitions validated")
 
         except MilvusException as e:
             raise PartitionNotFoundError(
-                f"Failed to validate partitions: {e}",
-                collection_name=collection.name
-            )
+                f"Failed to validate partitions: {e}", collection_name=collection.name
+            ) from e
 
     def validate_schema_compatibility(
         self,
         backup_metadata: BackupMetadata,
-        target_schema: Optional[Dict[str, Any]] = None
+        target_schema: dict[str, Any] | None = None,
     ) -> None:
         """
         Check schema compatibility between backup and target.
@@ -264,7 +253,7 @@ class BackupValidator:
             backup_field_dict = {f["name"]: f for f in backup_fields}
             target_field_dict = {f["name"]: f for f in target_fields}
 
-            for field_name in backup_field_dict.keys():
+            for field_name in backup_field_dict:
                 if field_name not in target_field_dict:
                     incompatibilities.append(f"Field '{field_name}' missing in target")
                     continue
@@ -280,12 +269,15 @@ class BackupValidator:
                     )
 
                 # Check vector dimension
-                if "dim" in backup_field and "dim" in target_field:
-                    if backup_field["dim"] != target_field["dim"]:
-                        incompatibilities.append(
-                            f"Field '{field_name}' dimension mismatch: "
-                            f"backup={backup_field['dim']}, target={target_field['dim']}"
-                        )
+                if (
+                    "dim" in backup_field
+                    and "dim" in target_field
+                    and backup_field["dim"] != target_field["dim"]
+                ):
+                    incompatibilities.append(
+                        f"Field '{field_name}' dimension mismatch: "
+                        f"backup={backup_field['dim']}, target={target_field['dim']}"
+                    )
 
             if incompatibilities:
                 raise SchemaIncompatibleError(
@@ -294,7 +286,7 @@ class BackupValidator:
                     collection_name=backup_metadata.collection_name,
                     backup_schema=backup_schema,
                     target_schema=target_schema,
-                    incompatibilities=incompatibilities
+                    incompatibilities=incompatibilities,
                 )
 
             logger.debug("Schema compatibility validated successfully")
@@ -305,10 +297,7 @@ class BackupValidator:
             logger.warning(f"Schema validation failed with error: {e}")
             # Don't fail the operation, schemas might still be compatible
 
-    def validate_backup_integrity(
-        self,
-        backup_metadata: BackupMetadata
-    ) -> bool:
+    def validate_backup_integrity(self, backup_metadata: BackupMetadata) -> bool:
         """
         Perform basic integrity validation on backup metadata.
 
@@ -358,7 +347,7 @@ class BackupValidator:
         """
         try:
             # CRITICAL FIX: Use the collection's connection alias for utility calls
-            using_alias = collection._using if hasattr(collection, '_using') else "default"
+            using_alias = collection._using if hasattr(collection, "_using") else "default"
             logger.debug(f"Estimating backup size using connection alias: {using_alias}")
 
             # Get entity count safely
@@ -377,16 +366,15 @@ class BackupValidator:
             # Rough estimate: 1KB per entity (very conservative)
             # Actual size depends on field types, dimensions, etc.
             estimated_size = max(num_entities * 1024, 1024 * 1024)  # At least 1MB
-            
+
             logger.debug(
                 f"Estimated backup size for {collection.name}: "
                 f"{estimated_size / (1024**2):.2f} MB ({num_entities} entities)"
             )
-            
+
             return estimated_size
-            
+
         except Exception as e:
             logger.warning(f"Failed to estimate backup size: {e}")
             # Return a conservative estimate
             return 1024 * 1024 * 1024  # 1 GB
-

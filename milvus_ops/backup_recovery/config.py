@@ -9,10 +9,10 @@ This configuration can be customized by external projects to match their
 specific requirements and deployment environments.
 """
 
-from dataclasses import dataclass, field, asdict
-from typing import Dict, Any, Optional
-from pathlib import Path
+from dataclasses import asdict, dataclass
 import logging
+from pathlib import Path
+from typing import Any
 
 from .models.entities import BackupStorageType, ChecksumAlgorithm
 
@@ -23,48 +23,48 @@ logger = logging.getLogger(__name__)
 class BackupRecoveryConfig:
     """
     Configuration for backup and recovery operations.
-    
+
     This class centralizes all configurable parameters for backup operations,
     making it easy for external projects to customize behavior without
     modifying the core implementation.
-    
+
     Storage Settings:
         default_storage_type: Default backend for backups (LOCAL_FILE or MILVUS_NATIVE)
         local_backup_root_path: Root directory for local file backups
         milvus_backup_bucket: Bucket/path for Milvus native backups
-    
+
     Performance Settings:
         default_chunk_size_mb: Size of chunks for large backups (default: 256MB)
         max_concurrent_chunks: Maximum parallel chunk processing (default: 4)
         compression_enabled: Enable compression by default
         compression_level: Compression level 1-9 (default: 6)
-    
+
     Reliability Settings:
         enable_checksum_verification: Always verify checksums (default: True)
         checksum_algorithm: Algorithm to use (SHA256, MD5, BLAKE2B)
         deep_verification_interval_days: Run deep verification every N days (default: 7)
         auto_verify_after_backup: Verify immediately after creating backup
         auto_verify_before_restore: Verify before restoring backup
-    
+
     Timeout Settings:
         default_backup_timeout: Maximum time for backup operations in seconds
         default_restore_timeout: Maximum time for restore operations in seconds
         verification_timeout: Maximum time for verification in seconds
-    
+
     Retention Settings:
         retention_count: Keep N most recent backups (default: 10)
         retention_days: Keep backups for N days (default: 30)
         min_backups_to_keep: Minimum backups to retain regardless of age (default: 3)
-    
+
     Retry Settings:
         retry_transient_errors: Retry on transient failures
         max_retries: Maximum retry attempts (default: 3)
         retry_delay_seconds: Base delay between retries (default: 5)
-    
+
     Monitoring Settings:
         enable_timing: Track performance metrics
         progress_poll_interval: Progress update interval in seconds (default: 2.0)
-    
+
     Example:
         ```python
         # Create custom configuration
@@ -75,7 +75,7 @@ class BackupRecoveryConfig:
             retention_count=20,
             enable_timing=True
         )
-        
+
         # Use with backup manager
         backup_manager = BackupManager(
             connection_mgr=conn_mgr,
@@ -84,12 +84,12 @@ class BackupRecoveryConfig:
         )
         ```
     """
-    
+
     # Storage Settings
     default_storage_type: BackupStorageType = BackupStorageType.LOCAL_FILE
     # Default path will be overridden by YAML configuration if available
     local_backup_root_path: str = "./collection_backup"
-    milvus_backup_bucket: Optional[str] = None
+    milvus_backup_bucket: str | None = None
 
     # Performance Settings
     default_chunk_size_mb: int = 256
@@ -133,36 +133,44 @@ class BackupRecoveryConfig:
         # Try to load settings from the main configuration
         try:
             from config import load_settings
+
             settings = load_settings()
 
             # If backup settings exist in the main config, apply them
-            if hasattr(settings, 'backup') and settings.backup:
-                if hasattr(settings.backup, 'backup_path') and settings.backup.backup_path:
+            if hasattr(settings, "backup") and settings.backup:
+                if hasattr(settings.backup, "backup_path") and settings.backup.backup_path:
                     self.local_backup_root_path = settings.backup.backup_path
                     logger.debug(f"Using backup path from config: {self.local_backup_root_path}")
 
-                if hasattr(settings.backup, 'compression') and settings.backup.compression is not None:
+                if (
+                    hasattr(settings.backup, "compression")
+                    and settings.backup.compression is not None
+                ):
                     self.compression_enabled = settings.backup.compression
-                    logger.debug(f"Using compression setting from config: {self.compression_enabled}")
+                    logger.debug(
+                        f"Using compression setting from config: {self.compression_enabled}"
+                    )
 
-                if hasattr(settings.backup, 'retention_days') and settings.backup.retention_days:
+                if hasattr(settings.backup, "retention_days") and settings.backup.retention_days:
                     self.retention_days = settings.backup.retention_days
                     logger.debug(f"Using retention days from config: {self.retention_days}")
         except Exception as e:
             logger.warning(f"Failed to load backup settings from main config: {e}")
-            logger.info(f"Using default backup settings: path={self.local_backup_root_path}, "
-                       f"compression={self.compression_enabled}, retention={self.retention_days} days")
+            logger.info(
+                f"Using default backup settings: path={self.local_backup_root_path}, "
+                f"compression={self.compression_enabled}, retention={self.retention_days} days"
+            )
 
         # Validate the final configuration
         self.validate()
-    
+
     def validate(self) -> None:
         """
         Validate configuration parameters.
-        
+
         Ensures all configuration values are within acceptable ranges and
         are logically consistent.
-        
+
         Raises:
             ValueError: If any configuration parameter is invalid
         """
@@ -170,18 +178,20 @@ class BackupRecoveryConfig:
         if self.default_chunk_size_mb <= 0:
             raise ValueError("default_chunk_size_mb must be positive")
         if self.default_chunk_size_mb > 2048:
-            logger.warning(f"Large chunk size ({self.default_chunk_size_mb}MB) may cause memory issues")
-        
+            logger.warning(
+                f"Large chunk size ({self.default_chunk_size_mb}MB) may cause memory issues"
+            )
+
         # Validate concurrency
         if self.max_concurrent_chunks <= 0:
             raise ValueError("max_concurrent_chunks must be positive")
         if self.max_concurrent_chunks > 16:
             logger.warning(f"High concurrency ({self.max_concurrent_chunks}) may strain resources")
-        
+
         # Validate compression level
         if not 1 <= self.compression_level <= 9:
             raise ValueError("compression_level must be between 1 and 9")
-        
+
         # Validate timeouts
         if self.default_backup_timeout <= 0:
             raise ValueError("default_backup_timeout must be positive")
@@ -189,7 +199,7 @@ class BackupRecoveryConfig:
             raise ValueError("default_restore_timeout must be positive")
         if self.verification_timeout <= 0:
             raise ValueError("verification_timeout must be positive")
-        
+
         # Validate retention settings
         if self.retention_count < 0:
             raise ValueError("retention_count cannot be negative")
@@ -197,7 +207,7 @@ class BackupRecoveryConfig:
             raise ValueError("retention_days cannot be negative")
         if self.min_backups_to_keep < 0:
             raise ValueError("min_backups_to_keep cannot be negative")
-        
+
         # Warn if retention settings might delete all backups
         if self.retention_count < self.min_backups_to_keep:
             logger.warning(
@@ -205,40 +215,42 @@ class BackupRecoveryConfig:
                 f"min_backups_to_keep ({self.min_backups_to_keep}). "
                 f"min_backups_to_keep will take precedence."
             )
-        
+
         # Validate retry settings
         if self.max_retries < 0:
             raise ValueError("max_retries cannot be negative")
         if self.retry_delay_seconds < 0:
             raise ValueError("retry_delay_seconds cannot be negative")
-        
+
         # Validate monitoring settings
         if self.progress_poll_interval <= 0:
             raise ValueError("progress_poll_interval must be positive")
-        
+
         # Validate storage path
-        if self.default_storage_type == BackupStorageType.LOCAL_FILE:
-            if not self.local_backup_root_path:
-                raise ValueError("local_backup_root_path must be set for LOCAL_FILE storage")
-        
+        if (
+            self.default_storage_type == BackupStorageType.LOCAL_FILE
+            and not self.local_backup_root_path
+        ):
+            raise ValueError("local_backup_root_path must be set for LOCAL_FILE storage")
+
         # Validate deep verification interval
         if self.deep_verification_interval_days < 0:
             raise ValueError("deep_verification_interval_days cannot be negative")
-    
+
     @classmethod
-    def from_dict(cls, config_dict: Dict[str, Any]) -> 'BackupRecoveryConfig':
+    def from_dict(cls, config_dict: dict[str, Any]) -> "BackupRecoveryConfig":
         """
         Create configuration from a dictionary.
-        
+
         This method allows loading configuration from external sources like
         JSON files, YAML files, or environment variables.
-        
+
         Args:
             config_dict: Dictionary containing configuration parameters
-        
+
         Returns:
             BackupRecoveryConfig instance
-        
+
         Example:
             ```python
             config_dict = {
@@ -250,30 +262,30 @@ class BackupRecoveryConfig:
             ```
         """
         # Handle enum conversions
-        if 'default_storage_type' in config_dict:
-            if isinstance(config_dict['default_storage_type'], str):
-                config_dict['default_storage_type'] = BackupStorageType(
-                    config_dict['default_storage_type']
-                )
-        
-        if 'checksum_algorithm' in config_dict:
-            if isinstance(config_dict['checksum_algorithm'], str):
-                config_dict['checksum_algorithm'] = ChecksumAlgorithm(
-                    config_dict['checksum_algorithm']
-                )
-        
+        if "default_storage_type" in config_dict and isinstance(
+            config_dict["default_storage_type"], str
+        ):
+            config_dict["default_storage_type"] = BackupStorageType(
+                config_dict["default_storage_type"]
+            )
+
+        if "checksum_algorithm" in config_dict and isinstance(
+            config_dict["checksum_algorithm"], str
+        ):
+            config_dict["checksum_algorithm"] = ChecksumAlgorithm(config_dict["checksum_algorithm"])
+
         return cls(**config_dict)
-    
-    def to_dict(self) -> Dict[str, Any]:
+
+    def to_dict(self) -> dict[str, Any]:
         """
         Convert configuration to a dictionary.
-        
+
         This method allows serializing configuration for storage or transmission.
         Enum values are converted to their string representations.
-        
+
         Returns:
             Dictionary representation of the configuration
-        
+
         Example:
             ```python
             config = BackupRecoveryConfig()
@@ -284,31 +296,31 @@ class BackupRecoveryConfig:
             ```
         """
         result = asdict(self)
-        
+
         # Convert enums to strings
-        if isinstance(result['default_storage_type'], BackupStorageType):
-            result['default_storage_type'] = result['default_storage_type'].value
-        if isinstance(result['checksum_algorithm'], ChecksumAlgorithm):
-            result['checksum_algorithm'] = result['checksum_algorithm'].value
-        
+        if isinstance(result["default_storage_type"], BackupStorageType):
+            result["default_storage_type"] = result["default_storage_type"].value
+        if isinstance(result["checksum_algorithm"], ChecksumAlgorithm):
+            result["checksum_algorithm"] = result["checksum_algorithm"].value
+
         return result
-    
+
     def get_backup_root_path(self) -> Path:
         """
         Get the backup root path as a Path object.
-        
+
         Returns:
             Path object for the backup root directory
         """
         return Path(self.local_backup_root_path)
-    
+
     def ensure_backup_directory_exists(self) -> None:
         """
         Ensure the backup root directory exists.
-        
+
         Creates the directory if it doesn't exist. Only applicable for
         local file storage.
-        
+
         Raises:
             OSError: If directory cannot be created
         """
@@ -316,22 +328,22 @@ class BackupRecoveryConfig:
             backup_path = self.get_backup_root_path()
             backup_path.mkdir(parents=True, exist_ok=True)
             logger.info(f"Ensured backup directory exists: {backup_path}")
-    
+
     @property
     def chunk_size_bytes(self) -> int:
         """Get chunk size in bytes."""
         return self.default_chunk_size_mb * 1024 * 1024
-    
+
     @property
     def is_local_storage(self) -> bool:
         """Check if using local file storage."""
         return self.default_storage_type == BackupStorageType.LOCAL_FILE
-    
+
     @property
     def is_milvus_native_storage(self) -> bool:
         """Check if using Milvus native storage."""
         return self.default_storage_type == BackupStorageType.MILVUS_NATIVE
-    
+
     def __repr__(self) -> str:
         """String representation of configuration."""
         return (
@@ -342,4 +354,3 @@ class BackupRecoveryConfig:
             f"retention={self.retention_count} backups / {self.retention_days} days"
             f")"
         )
-

@@ -8,7 +8,7 @@ Supports multiple hash algorithms with streaming for large files.
 import hashlib
 import logging
 from pathlib import Path
-from typing import Union, BinaryIO, Optional
+
 from ..models.entities import ChecksumAlgorithm
 
 logger = logging.getLogger(__name__)
@@ -17,23 +17,23 @@ logger = logging.getLogger(__name__)
 class ChecksumCalculator:
     """
     Calculate and verify checksums for backup data integrity.
-    
+
     This class provides methods for calculating checksums of files and data
     using various algorithms, with support for streaming large files to
     avoid loading them entirely into memory.
-    
+
     Supported algorithms:
         - SHA256: Secure, recommended for production
         - MD5: Fast but less secure, suitable for non-critical use
         - BLAKE2B: Fast and secure, modern alternative
-    
+
     Example:
         ```python
         calculator = ChecksumCalculator(ChecksumAlgorithm.SHA256)
-        
+
         # Calculate checksum for a file
         checksum = await calculator.calculate_file_checksum("/path/to/file")
-        
+
         # Verify file against known checksum
         is_valid = await calculator.verify_file_checksum(
             "/path/to/file",
@@ -41,27 +41,27 @@ class ChecksumCalculator:
         )
         ```
     """
-    
+
     # Buffer size for streaming file reads (1 MB)
     BUFFER_SIZE = 1024 * 1024
-    
+
     def __init__(self, algorithm: ChecksumAlgorithm = ChecksumAlgorithm.SHA256):
         """
         Initialize checksum calculator with specified algorithm.
-        
+
         Args:
             algorithm: Hash algorithm to use for checksum calculation
         """
         self.algorithm = algorithm
         logger.debug(f"ChecksumCalculator initialized with {algorithm.value}")
-    
+
     def _get_hash_function(self):
         """
         Get the hash function for the configured algorithm.
-        
+
         Returns:
             Hash function object
-        
+
         Raises:
             ValueError: If algorithm is not supported
         """
@@ -73,12 +73,8 @@ class ChecksumCalculator:
             return hashlib.blake2b()
         else:
             raise ValueError(f"Unsupported checksum algorithm: {self.algorithm}")
-    
-    def calculate_file_checksum(
-        self,
-        file_path: Union[str, Path],
-        buffer_size: Optional[int] = None
-    ) -> str:
+
+    def calculate_file_checksum(self, file_path: str | Path, buffer_size: int | None = None) -> str:
         """
         Calculate checksum for a file using streaming to handle large files.
 
@@ -111,7 +107,7 @@ class ChecksumCalculator:
         try:
             hash_func = self._get_hash_function()
 
-            with open(file_path, 'rb') as f:
+            with open(file_path, "rb") as f:
                 while True:
                     data = f.read(buffer_size)
                     if not data:
@@ -124,7 +120,7 @@ class ChecksumCalculator:
 
         except Exception as e:
             logger.error(f"Failed to calculate checksum for {file_path}: {e}")
-            raise IOError(f"Error reading file for checksum: {e}")
+            raise OSError(f"Error reading file for checksum: {e}") from e
 
     def calculate_data_checksum(self, data: bytes) -> str:
         """
@@ -153,13 +149,13 @@ class ChecksumCalculator:
             return checksum
         except Exception as e:
             logger.error(f"Failed to calculate checksum for data: {e}")
-            raise ValueError(f"Error calculating checksum: {e}")
+            raise ValueError(f"Error calculating checksum: {e}") from e
 
     def verify_file_checksum(
         self,
-        file_path: Union[str, Path],
+        file_path: str | Path,
         expected_checksum: str,
-        buffer_size: Optional[int] = None
+        buffer_size: int | None = None,
     ) -> bool:
         """
         Verify a file's checksum against an expected value.
@@ -235,9 +231,7 @@ class ChecksumCalculator:
             return False
 
     def calculate_directory_checksum(
-        self,
-        directory_path: Union[str, Path],
-        include_hidden: bool = False
+        self, directory_path: str | Path, include_hidden: bool = False
     ) -> str:
         """
         Calculate a combined checksum for all files in a directory.
@@ -267,13 +261,13 @@ class ChecksumCalculator:
 
         # Get all files sorted by name for consistent ordering
         files = sorted(
-            [f for f in directory_path.rglob('*') if f.is_file()],
-            key=lambda x: str(x.relative_to(directory_path))
+            [f for f in directory_path.rglob("*") if f.is_file()],
+            key=lambda x: str(x.relative_to(directory_path)),
         )
 
         # Filter hidden files if requested
         if not include_hidden:
-            files = [f for f in files if not any(part.startswith('.') for part in f.parts)]
+            files = [f for f in files if not any(part.startswith(".") for part in f.parts)]
 
         # Calculate combined checksum
         hash_func = self._get_hash_function()
@@ -281,34 +275,33 @@ class ChecksumCalculator:
         for file_path in files:
             # Include relative path in hash for structure verification
             relative_path = str(file_path.relative_to(directory_path))
-            hash_func.update(relative_path.encode('utf-8'))
+            hash_func.update(relative_path.encode("utf-8"))
 
             # Add file checksum
             file_checksum = self.calculate_file_checksum(file_path)
-            hash_func.update(file_checksum.encode('utf-8'))
-        
+            hash_func.update(file_checksum.encode("utf-8"))
+
         combined_checksum = hash_func.hexdigest()
-        logger.info(f"Calculated directory checksum for {len(files)} files: {combined_checksum[:16]}...")
+        logger.info(
+            f"Calculated directory checksum for {len(files)} files: {combined_checksum[:16]}..."
+        )
         return combined_checksum
-    
+
     @staticmethod
-    def generate_checksum_with_algorithm(
-        data: bytes,
-        algorithm: ChecksumAlgorithm
-    ) -> str:
+    def generate_checksum_with_algorithm(data: bytes, algorithm: ChecksumAlgorithm) -> str:
         """
         Static helper to generate checksum with specific algorithm.
-        
+
         Convenience method for one-off checksum calculations without
         creating a calculator instance.
-        
+
         Args:
             data: Data to hash
             algorithm: Hash algorithm to use
-        
+
         Returns:
             Hexadecimal checksum string
-        
+
         Example:
             ```python
             checksum = ChecksumCalculator.generate_checksum_with_algorithm(
@@ -319,4 +312,3 @@ class ChecksumCalculator:
         """
         calculator = ChecksumCalculator(algorithm)
         return calculator.calculate_data_checksum(data)
-

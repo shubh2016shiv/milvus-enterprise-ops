@@ -6,33 +6,29 @@ Uses Parquet format for efficient data storage and supports chunking for
 very large collections.
 """
 
+from datetime import datetime
 import json
 import logging
-import shutil
-import uuid
-from datetime import datetime
 from pathlib import Path
-from typing import List, Optional, Dict, Any, Tuple
-import asyncio
+import shutil
+from typing import Any
+import uuid
 
-from pymilvus import Collection, utility
-from pymilvus.exceptions import MilvusException
+from pymilvus import Collection
 
 from ..config import BackupRecoveryConfig
-from ..models.entities import (
-    BackupMetadata,
-    BackupType,
-    BackupStorageType,
-    BackupState,
-    ChecksumAlgorithm
-)
-from ..models.parameters import BackupParams
 from ..exceptions import (
     BackupError,
     BackupNotFoundError,
     BackupStorageError,
-    InsufficientStorageError
 )
+from ..models.entities import (
+    BackupMetadata,
+    BackupState,
+    BackupStorageType,
+    BackupType,
+)
+from ..models.parameters import BackupParams
 from ..utils.checksum import ChecksumCalculator
 from ..utils.compression import CompressionHandler
 from ..utils.progress import BackupProgressTracker
@@ -44,6 +40,7 @@ logger = logging.getLogger(__name__)
 try:
     import pyarrow as pa
     import pyarrow.parquet as pq
+
     PARQUET_AVAILABLE = True
 except ImportError:
     PARQUET_AVAILABLE = False
@@ -112,8 +109,7 @@ class LocalBackupBackend:
         # Initialize utilities
         self.checksum_calculator = ChecksumCalculator(config.checksum_algorithm)
         self.compression_handler = CompressionHandler(
-            compression_level=config.compression_level,
-            prefer_zstd=True
+            compression_level=config.compression_level, prefer_zstd=True
         )
 
         # Ensure root directory exists
@@ -133,9 +129,9 @@ class LocalBackupBackend:
         self,
         collection: Collection,
         params: BackupParams,
-        backup_id: Optional[str] = None,
-        backup_name: Optional[str] = None,
-        progress_tracker: Optional[BackupProgressTracker] = None
+        backup_id: str | None = None,
+        backup_name: str | None = None,
+        progress_tracker: BackupProgressTracker | None = None,
     ) -> BackupMetadata:
         """
         Create a backup of a collection.
@@ -156,7 +152,11 @@ class LocalBackupBackend:
         """
         collection_name = collection.name
         backup_id = backup_id or str(uuid.uuid4())
-        backup_name = backup_name or params.backup_name or f"{collection_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        backup_name = (
+            backup_name
+            or params.backup_name
+            or f"{collection_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        )
 
         backup_dir = self._get_backup_directory(collection_name, backup_id)
 
@@ -188,13 +188,12 @@ class LocalBackupBackend:
                 partitions=partitions,
                 data_dir=data_dir,
                 params=params,
-                progress_tracker=progress_tracker
+                progress_tracker=progress_tracker,
             )
 
             # Export indexes if requested
-            index_info = None
             if params.include_indexes:
-                index_info = self._export_indexes(collection, backup_dir / "indexes")
+                self._export_indexes(collection, backup_dir / "indexes")
 
             # Calculate checksums
             checksums = self._calculate_checksums(backup_dir)
@@ -225,7 +224,7 @@ class LocalBackupBackend:
                 row_count=total_rows,
                 compression_enabled=params.compression_enabled,
                 compression_level=params.compression_level,
-                include_indexes=params.include_indexes
+                include_indexes=params.include_indexes,
             )
 
             # Save metadata and schema
@@ -261,10 +260,10 @@ class LocalBackupBackend:
                 f"Failed to create backup: {str(e)}",
                 collection_name=collection_name,
                 backup_id=backup_id,
-                storage_path=str(backup_dir)
-            )
+                storage_path=str(backup_dir),
+            ) from e
 
-    def _export_schema(self, collection: Collection) -> Dict[str, Any]:
+    def _export_schema(self, collection: Collection) -> dict[str, Any]:
         """Export collection schema."""
         try:
             schema = collection.schema
@@ -273,7 +272,7 @@ class LocalBackupBackend:
                 "collection_name": collection.name,
                 "description": collection.description,
                 "fields": [],
-                "enable_dynamic_field": getattr(schema, "enable_dynamic_field", False)
+                "enable_dynamic_field": getattr(schema, "enable_dynamic_field", False),
             }
 
             for field in schema.fields:
@@ -282,7 +281,7 @@ class LocalBackupBackend:
                     "dtype": str(field.dtype),
                     "description": field.description or "",
                     "is_primary": field.is_primary,
-                    "auto_id": field.auto_id if hasattr(field, "auto_id") else False
+                    "auto_id": field.auto_id if hasattr(field, "auto_id") else False,
                 }
 
                 # Add dimension for vector fields
@@ -298,13 +297,9 @@ class LocalBackupBackend:
             return schema_dict
 
         except Exception as e:
-            raise BackupError(f"Failed to export schema: {e}")
+            raise BackupError(f"Failed to export schema: {e}") from e
 
-    def _get_partitions_to_backup(
-        self,
-        collection: Collection,
-        params: BackupParams
-    ) -> List[str]:
+    def _get_partitions_to_backup(self, collection: Collection, params: BackupParams) -> list[str]:
         """Get list of partitions to backup."""
         if params.backup_type == BackupType.PARTITION:
             return params.partition_names
@@ -315,11 +310,11 @@ class LocalBackupBackend:
     def _export_data(
         self,
         collection: Collection,
-        partitions: List[str],
+        partitions: list[str],
         data_dir: Path,
         params: BackupParams,
-        progress_tracker: Optional[BackupProgressTracker]
-    ) -> Tuple[int, List[Path]]:
+        progress_tracker: BackupProgressTracker | None,
+    ) -> tuple[int, list[Path]]:
         """
         Export collection data to Parquet files.
 
@@ -357,11 +352,14 @@ class LocalBackupBackend:
 
                 while True:
                     chunk_number += 1
-                    logger.debug(f"Querying chunk {chunk_number} (offset={offset}, limit={CHUNK_SIZE})")
+                    logger.debug(
+                        f"Querying chunk {chunk_number} (offset={offset}, limit={CHUNK_SIZE})"
+                    )
 
                     try:
                         # Generate robust query expression that works across all Milvus versions
-                        # This avoids the "empty expression should be used with limit" error in some Milvus versions
+                        # This avoids the "empty expression should be used with limit"
+                        # error in some Milvus versions
                         query_expr = generate_query_expression(collection)
                         logger.debug(f"Using query expression: {query_expr}")
 
@@ -371,7 +369,7 @@ class LocalBackupBackend:
                             partition_names=[partition_name],
                             output_fields=["*"],
                             limit=CHUNK_SIZE,
-                            offset=offset
+                            offset=offset,
                         )
 
                         if not chunk_results:
@@ -389,7 +387,10 @@ class LocalBackupBackend:
 
                         # If we got fewer rows than requested, we've reached the end
                         if rows_fetched < CHUNK_SIZE:
-                            logger.debug(f"Received partial chunk ({rows_fetched} < {CHUNK_SIZE}), finished partition")
+                            logger.debug(
+                                f"Received partial chunk ({rows_fetched} < {CHUNK_SIZE}), "
+                                f"finished partition"
+                            )
                             break
 
                         # Move to next chunk
@@ -399,7 +400,9 @@ class LocalBackupBackend:
                         logger.error(f"Error fetching chunk {chunk_number}: {chunk_error}")
                         # If we already have some data, continue with what we have
                         if partition_results:
-                            logger.warning(f"Continuing with {len(partition_results)} rows already fetched")
+                            logger.warning(
+                                f"Continuing with {len(partition_results)} rows already fetched"
+                            )
                             break
                         else:
                             raise
@@ -442,9 +445,9 @@ class LocalBackupBackend:
             return total_rows, data_files
 
         except Exception as e:
-            raise BackupError(f"Failed to export data: {e}")
+            raise BackupError(f"Failed to export data: {e}") from e
 
-    def _export_indexes(self, collection: Collection, indexes_dir: Path) -> Dict[str, Any]:
+    def _export_indexes(self, collection: Collection, indexes_dir: Path) -> dict[str, Any]:
         """Export index definitions."""
         try:
             indexes_info = {"indexes": []}
@@ -453,13 +456,13 @@ class LocalBackupBackend:
                 index_dict = {
                     "field_name": index.field_name,
                     "index_name": index.index_name,
-                    "params": index.params
+                    "params": index.params,
                 }
                 indexes_info["indexes"].append(index_dict)
 
             # Save indexes info
             indexes_file = indexes_dir / "indexes.json"
-            with open(indexes_file, 'w') as f:
+            with open(indexes_file, "w") as f:
                 json.dump(indexes_info, f, indent=2)
 
             logger.info(f"Exported {len(indexes_info['indexes'])} index definitions")
@@ -469,13 +472,13 @@ class LocalBackupBackend:
             logger.warning(f"Failed to export indexes: {e}")
             return {"indexes": []}
 
-    def _calculate_checksums(self, backup_dir: Path) -> Dict[str, str]:
+    def _calculate_checksums(self, backup_dir: Path) -> dict[str, str]:
         """Calculate checksums for all files in backup."""
         checksums = {}
 
         try:
             all_files = list(backup_dir.rglob("*"))
-            data_files = [f for f in all_files if f.is_file() and f.suffix in ['.parquet', '.json']]
+            data_files = [f for f in all_files if f.is_file() and f.suffix in [".parquet", ".json"]]
 
             for file_path in data_files:
                 relative_path = file_path.relative_to(backup_dir)
@@ -485,7 +488,7 @@ class LocalBackupBackend:
             # Calculate overall checksum
             combined_checksums = "".join(sorted(checksums.values()))
             overall_checksum = self.checksum_calculator.calculate_data_checksum(
-                combined_checksums.encode('utf-8')
+                combined_checksums.encode("utf-8")
             )
             checksums["__all__"] = overall_checksum
 
@@ -499,25 +502,22 @@ class LocalBackupBackend:
     def _save_metadata(self, backup_dir: Path, metadata: BackupMetadata) -> None:
         """Save backup metadata."""
         metadata_file = backup_dir / "metadata.json"
-        with open(metadata_file, 'w') as f:
-            json.dump(metadata.model_dump(mode='json'), f, indent=2, default=str)
+        with open(metadata_file, "w") as f:
+            json.dump(metadata.model_dump(mode="json"), f, indent=2, default=str)
 
-    def _save_schema(self, backup_dir: Path, schema_dict: Dict[str, Any]) -> None:
+    def _save_schema(self, backup_dir: Path, schema_dict: dict[str, Any]) -> None:
         """Save collection schema."""
         schema_file = backup_dir / "schema.json"
-        with open(schema_file, 'w') as f:
+        with open(schema_file, "w") as f:
             json.dump(schema_dict, f, indent=2)
 
-    def _save_checksums(self, backup_dir: Path, checksums: Dict[str, str]) -> None:
+    def _save_checksums(self, backup_dir: Path, checksums: dict[str, str]) -> None:
         """Save file checksums."""
         checksums_file = backup_dir / "checksums.json"
-        with open(checksums_file, 'w') as f:
+        with open(checksums_file, "w") as f:
             json.dump(checksums, f, indent=2)
 
-    def list_backups(
-        self,
-        collection_name: Optional[str] = None
-    ) -> List[BackupMetadata]:
+    def list_backups(self, collection_name: str | None = None) -> list[BackupMetadata]:
         """
         List available backups.
 
@@ -546,8 +546,7 @@ class LocalBackupBackend:
                         for backup_dir in collection_dir.iterdir():
                             if backup_dir.is_dir():
                                 metadata = self.get_backup_metadata(
-                                    collection_dir.name,
-                                    backup_dir.name
+                                    collection_dir.name, backup_dir.name
                                 )
                                 if metadata:
                                     backups.append(metadata)
@@ -562,11 +561,7 @@ class LocalBackupBackend:
             logger.error(f"Failed to list backups: {e}")
             return []
 
-    def get_backup_metadata(
-        self,
-        collection_name: str,
-        backup_id: str
-    ) -> Optional[BackupMetadata]:
+    def get_backup_metadata(self, collection_name: str, backup_id: str) -> BackupMetadata | None:
         """
         Get backup metadata.
 
@@ -584,7 +579,7 @@ class LocalBackupBackend:
             return None
 
         try:
-            with open(metadata_file, 'r') as f:
+            with open(metadata_file) as f:
                 data = json.load(f)
                 return BackupMetadata(**data)
         except Exception as e:
@@ -611,7 +606,7 @@ class LocalBackupBackend:
             raise BackupNotFoundError(
                 f"Backup not found: {backup_id}",
                 backup_id=backup_id,
-                storage_path=str(backup_dir)
+                storage_path=str(backup_dir),
             )
 
         try:
@@ -620,9 +615,8 @@ class LocalBackupBackend:
             return True
         except Exception as e:
             raise BackupStorageError(
-                f"Failed to delete backup: {e}",
-                storage_path=str(backup_dir)
-            )
+                f"Failed to delete backup: {e}", storage_path=str(backup_dir)
+            ) from e
 
     def verify_backup(self, collection_name: str, backup_id: str) -> bool:
         """
@@ -644,29 +638,29 @@ class LocalBackupBackend:
 
         try:
             # Load stored checksums
-            with open(checksums_file, 'r') as f:
+            with open(checksums_file) as f:
                 stored_checksums = json.load(f)
 
             # Recalculate checksums
             current_checksums = self._calculate_checksums(backup_dir)
-            
+
             # Compare
             for file_path, stored_checksum in stored_checksums.items():
                 if file_path == "__all__":
                     continue
-                
+
                 current_checksum = current_checksums.get(file_path)
                 if current_checksum != stored_checksum:
                     logger.error(
                         f"Checksum mismatch for {file_path}: "
-                        f"expected {stored_checksum[:16]}..., got {current_checksum[:16] if current_checksum else 'None'}..."
+                        f"expected {stored_checksum[:16]}..., got "
+                        f"{current_checksum[:16] if current_checksum else 'None'}..."
                     )
                     return False
-            
+
             logger.info(f"Backup verification passed for {backup_id}")
             return True
-            
+
         except Exception as e:
             logger.error(f"Backup verification failed: {e}")
             return False
-
