@@ -37,7 +37,7 @@ def try_parse_timestamp(timestamp_value: float | int | str) -> datetime:
             return datetime.fromtimestamp(float(timestamp_value))
         else:
             return datetime.now()
-    except (ValueError, TypeError):
+    except (ValueError, TypeError, OSError):
         return datetime.now()
 
 

@@ -315,4 +315,11 @@ class SchemaValidator:
                 f"Schemas have different shard numbers: {schema1.shard_num} vs {schema2.shard_num}"
             )
 
+        # Check enable_dynamic_field
+        if schema1.enable_dynamic_field != schema2.enable_dynamic_field:
+            incompatibilities.append(
+                f"Schemas have different enable_dynamic_field settings: "
+                f"{schema1.enable_dynamic_field} vs {schema2.enable_dynamic_field}"
+            )
+
         return len(incompatibilities) == 0, incompatibilities

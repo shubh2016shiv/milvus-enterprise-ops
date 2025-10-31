@@ -54,7 +54,19 @@ class CollectionManager:
 
         Args:
             connection_manager: The ConnectionManager instance to use for Milvus communication
+
+        Raises:
+            TypeError: If connection_manager is None or not a valid ConnectionManager instance
         """
+        if connection_manager is None:
+            raise TypeError("connection_manager cannot be None")
+
+        # Basic validation that connection_manager has required methods
+        required_methods = ["execute_operation_async"]
+        for method in required_methods:
+            if not hasattr(connection_manager, method):
+                raise TypeError(f"connection_manager must have {method} method")
+
         self._connection_manager = connection_manager
         self._locks: dict[str, asyncio.Lock] = {}
         self._global_lock = asyncio.Lock()
@@ -100,9 +112,18 @@ class CollectionManager:
             active operations, as it only removes locks for non-existent collections.
         """
         async with self._global_lock:
-            # Get the current list of collections from Milvus
-            # Use strict=False to avoid raising exceptions during cleanup
-            all_collections = await self.list_collections(strict=False)
+            try:
+                # Get the current list of collections from Milvus
+                # Use strict=False to avoid raising exceptions during cleanup
+                all_collections = await self.list_collections(strict=False)
+            except Exception as e:
+                # If we can't list collections due to connection issues,
+                # err on the side of caution and don't remove any locks
+                logger.warning(
+                    f"[cleanup_unused_locks] Failed to list collections during cleanup: {e}. "
+                    "Skipping cleanup to avoid removing active locks."
+                )
+                return 0
 
             if all_collections is None:
                 all_collections = []
@@ -212,6 +233,9 @@ class CollectionManager:
                     # This is equivalent to collection not found in Milvus
                     logger.info(f"Collection '{collection_name}' doesn't exist yet, will create it")
                     # We'll continue with creation below
+                except SchemaError:
+                    # Schema errors from comparison should be re-raised
+                    raise
                 except Exception as e:
                     logger.error(f"Error checking existing collection schema: {e}")
                     raise CollectionError(f"Error checking existing collection: {e}") from e
@@ -395,7 +419,17 @@ class CollectionManager:
             CollectionError: If `strict` is `True` and an error occurs during the
                              check.
             OperationTimeoutError: If the operation times out and `strict` is `True`.
+            ValueError: If collection_name is None or empty string.
+            TypeError: If collection_name is None.
         """
+        # Validate input parameters
+        if collection_name is None:
+            raise TypeError("collection_name cannot be None")
+        if not isinstance(collection_name, str):
+            raise TypeError(f"collection_name must be a string, got {type(collection_name)}")
+        if collection_name == "":
+            raise ValueError("collection_name cannot be an empty string")
+
         try:
             result = await self._connection_manager.execute_operation_async(
                 lambda alias: self._has_collection_internal(alias, collection_name),
@@ -633,12 +667,10 @@ class CollectionManager:
         collection_id = collection.name
 
         # Handle created_at with clear indication if synthesized
-        import datetime
-
         created_at = getattr(collection, "created_time", None)
         created_at_is_synthetic = created_at is None
         if created_at is None:
-            created_at = datetime.datetime.now()
+            created_at = datetime.now()
 
         # Compute schema hash
         schema_hash = schema.compute_hash()
@@ -1224,6 +1256,9 @@ class CollectionManager:
                 timeout=timeout,
             )
             return await self._ensure_awaited(result)
+        except CollectionNotFoundError:
+            # Re-raise CollectionNotFoundError (from exists check)
+            raise
         except CollectionNotExistException:
             raise CollectionNotFoundError(
                 f"Collection '{collection_name}' does not exist during insert."
