@@ -347,7 +347,7 @@ def with_retry(self, func: Callable):
         except RetryableException as e:
             if attempt == self.config.connection.retry_count - 1:
                 raise MaxRetriesExceededError(f"Max retries exceeded: {e}")
-            
+
             wait_time = self.config.connection.retry_interval * (2 ** attempt)
             wait_time += random.uniform(0, wait_time * 0.1)  # Jitter
             time.sleep(wait_time)
@@ -530,7 +530,7 @@ def compute_hash(self) -> str:
         "enable_dynamic_field": self.enable_dynamic_field,
         "shard_num": self.shard_num
     }
-    
+
     # Include only functional field properties
     for field in self.fields:
         functional_field = {
@@ -540,26 +540,26 @@ def compute_hash(self) -> str:
             "auto_id": field.auto_id,
             "is_partition_key": field.is_partition_key
         }
-        
+
         # Include type-specific properties
         if field.dim is not None:
             functional_field["dim"] = field.dim
-            
+
         if field.max_length is not None:
             functional_field["max_length"] = field.max_length
-            
+
         if field.element_type is not None:
             # Convert enum to string to ensure JSON serialization works
             functional_field["element_type"] = field.element_type.value if hasattr(field.element_type, 'value') else str(field.element_type)
-            
+
         functional_schema["fields"].append(functional_field)
-    
+
     # Sort fields by name for deterministic ordering
     functional_schema["fields"] = sorted(functional_schema["fields"], key=lambda x: x["name"])
-    
+
     # Convert to a canonical JSON string
     canonical = json.dumps(functional_schema, sort_keys=True)
-    
+
     # Compute SHA-256 hash
     return hashlib.sha256(canonical.encode()).hexdigest()
 ```
@@ -592,7 +592,7 @@ async def execute_operation_async(self, operation_func, timeout=None):
     try:
         # Get a connection from the pool
         connection_alias = await self._pool.get_connection_async()
-        
+
         # Execute the operation with the connection
         result = await asyncio.wait_for(
             asyncio.to_thread(operation_func, connection_alias),
@@ -624,7 +624,7 @@ class CollectionDescription(BaseModel):
     state: CollectionState = Field(CollectionState.AVAILABLE, description="The current lifecycle state of the collection.")
     load_state: LoadState = Field(LoadState.UNLOADED, description="The current memory load state of the collection.")
     created_at_is_synthetic: bool = Field(False, description="True if the creation timestamp was synthesized by the client.")
-    
+
     class Config:
         """Pydantic configuration."""
         arbitrary_types_allowed = True
@@ -642,7 +642,7 @@ def try_parse_timestamp(timestamp_value: Union[float, int, str]) -> datetime:
     Safely parse a timestamp value to a datetime object.
     """
     try:
-        if isinstance(timestamp_value, (int, float)):
+        if isinstance(timestamp_value, int | float):
             return datetime.fromtimestamp(float(timestamp_value))
         elif isinstance(timestamp_value, str):
             return datetime.fromtimestamp(float(timestamp_value))
@@ -668,13 +668,13 @@ A concrete example of this approach is seen in the `_describe_collection_interna
 async def _describe_collection_internal(self, alias: str, collection_name: str) -> CollectionDescription:
     """Internal helper to describe a collection via the PyMilvus SDK."""
     from pymilvus import Collection
-    
+
     # Get the collection
     collection = Collection(name=collection_name, using=alias)
-    
+
     # Get schema
     milvus_schema = collection.schema
-    
+
     # Convert pymilvus schema to our schema model
     fields = []
     for field in milvus_schema.fields:
@@ -685,10 +685,10 @@ async def _describe_collection_internal(self, alias: str, collection_name: str) 
             "dtype": dtype_name,
             # Other parameters...
         }
-        
+
         field_schema = FieldSchema(**field_params)
         fields.append(field_schema)
-    
+
     # Create our CollectionSchema - the temporary field objects are no longer referenced
     schema = CollectionSchema(
         fields=fields,
@@ -696,7 +696,7 @@ async def _describe_collection_internal(self, alias: str, collection_name: str) 
         enable_dynamic_field=getattr(collection, "enable_dynamic_field", False),
         shard_num=getattr(collection, "num_shards", 2)
     )
-    
+
     # Return the CollectionDescription - temporary objects are garbage collected
     return CollectionDescription(
         name=collection_name,
@@ -731,20 +731,20 @@ max_poll_interval = 5.0  # Cap at 5s
 while True:
     # Check progress
     progress = await self.get_load_progress(collection_name, timeout=timeout)
-    
+
     if progress.is_complete:
         return progress
-    
+
     # Check timeout
     elapsed = time.time() - start_time
     if timeout and elapsed > timeout:
         error_msg = f"Timed out waiting for collection '{collection_name}' to load after {elapsed:.1f}s"
         logger.error(error_msg)
         raise OperationTimeoutError(error_msg)
-    
+
     # Wait before checking again with gentle backoff
     await asyncio.sleep(poll_interval)
-    
+
     # Increase poll interval with a cap
     poll_interval = min(poll_interval * 1.5, max_poll_interval)
 ```
@@ -1082,14 +1082,14 @@ The `execute_operation_async` method in `ConnectionManager` implements this non-
 # From ConnectionManager.execute_operation_async
 async def execute_operation_async(self, operation: Callable, *args, **kwargs):
     # ... other code ...
-    
+
     # Run the operation in a thread pool to avoid blocking the event loop
     loop = asyncio.get_running_loop()
     result = await loop.run_in_executor(
         None,  # Use default executor
         _execute_operation_with_pool_async  # This is the synchronous function
     )
-    
+
     return result
 ```
 
@@ -1118,10 +1118,10 @@ async def _execute_with_circuit_breaker(self, operation: Callable, *args, **kwar
         def _execute_operation_with_pool():
             with self._pool.get_connection() as conn_alias:
                 return operation(conn_alias, *args, **kwargs)
-        
+
         # This is where the thread delegation happens
         return await asyncio.to_thread(_execute_operation_with_pool)
-    
+
     return await self._circuit_breaker.execute_milvus_operation(_protected_operation)
 ```
 
@@ -1138,9 +1138,9 @@ try:
     # Try to get a connection from the pool - THIS IS THE BACKPRESSURE POINT
     # If all connections are in use, this will block until one is returned or timeout
     conn_alias = self._available_connections.get(timeout=timeout)
-    
+
     # ... connection health check and usage ...
-    
+
 except queue.Empty:
     # If timeout occurs before a connection becomes available
     raise ConnectionPoolExhaustedError(
@@ -1164,7 +1164,7 @@ connection:
   # Maximum number of connections to keep in the connection pool.
   # This controls the maximum concurrent operations to Milvus
   connection_pool_size: 10
-  
+
   # Connection and operation timeout in seconds.
   # This controls how long requests will wait for an available connection
   timeout: 60
