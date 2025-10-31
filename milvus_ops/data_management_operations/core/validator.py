@@ -40,7 +40,6 @@ _DATA_TYPE_TO_PYTHON_TYPE = {
     DataType.FLOAT: float,
     DataType.DOUBLE: float,
     DataType.VARCHAR: str,
-    DataType.STRING: str,
     DataType.JSON: dict,
     # Vectors are handled separately
 }

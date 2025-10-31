@@ -993,6 +993,238 @@ def slow_operation() -> Callable[[str, float], str]:
 
 
 # ============================================================================
+# Data Management Operations Fixtures
+# ============================================================================
+
+
+@pytest.fixture
+def mock_collection_manager():
+    """
+    Create a mock CollectionManager for testing data management operations.
+
+    Coverage: CollectionManager mocking for data operations tests.
+    """
+    mock_manager = MagicMock()
+
+    # Mock async methods with AsyncMock
+    mock_manager.has_collection = AsyncMock(return_value=True)
+    mock_manager.describe_collection = AsyncMock()
+    mock_manager.create_collection = AsyncMock()
+    mock_manager.load_collection = AsyncMock()
+
+    return mock_manager
+
+
+@pytest.fixture
+def sample_documents():
+    """
+    Create sample Document instances for testing.
+
+    Coverage: Document creation and validation tests.
+    """
+    from milvus_ops.data_management_operations.models.entities import Document
+
+    return [
+        Document(id=1, vector=[0.1] * 128, text="First document"),
+        Document(id=2, vector=[0.2] * 128, text="Second document"),
+        Document(id=3, vector=[0.3] * 128, text="Third document"),
+    ]
+
+
+@pytest.fixture
+def sample_document_dicts():
+    """
+    Create sample plain dictionary documents for testing.
+
+    Coverage: Dictionary document handling tests.
+    """
+    return [
+        {"id": 1, "vector": [0.1] * 128, "text": "First document"},
+        {"id": 2, "vector": [0.2] * 128, "text": "Second document"},
+        {"id": 3, "vector": [0.3] * 128, "text": "Third document"},
+    ]
+
+
+@pytest.fixture
+def invalid_documents():
+    """
+    Create documents with validation errors for testing error handling.
+
+    Coverage: Validation error handling tests.
+    """
+    return [
+        {"id": "invalid_id", "vector": [0.1] * 128},  # String ID when int expected
+        {"id": 2, "vector": "not_a_vector"},  # Invalid vector type
+        {"id": 3, "vector": [0.1] * 64},  # Wrong vector dimension
+        {"missing_id": True, "vector": [0.1] * 128},  # Missing required field
+        {"id": 4, "extra_field": "not_in_schema"},  # Extraneous field (if schema doesn't allow)
+    ]
+
+
+@pytest.fixture
+def batch_operation_result_samples():
+    """
+    Create sample BatchOperationResult instances for different scenarios.
+
+    Coverage: BatchOperationResult property tests.
+    """
+    from milvus_ops.data_management_operations.models.entities import (
+        BatchOperationResult,
+        OperationStatus,
+    )
+
+    return {
+        "success": BatchOperationResult(
+            status=OperationStatus.SUCCESS,
+            successful_count=10,
+            failed_count=0,
+            inserted_ids=list(range(1, 11)),
+        ),
+        "partial": BatchOperationResult(
+            status=OperationStatus.PARTIAL,
+            successful_count=8,
+            failed_count=2,
+            inserted_ids=list(range(1, 9)),
+            error_messages={"9": "Validation error", "10": "Type mismatch"},
+        ),
+        "failed": BatchOperationResult(
+            status=OperationStatus.FAILED,
+            successful_count=0,
+            failed_count=5,
+            error_messages={str(i): f"Error {i}" for i in range(1, 6)},
+        ),
+    }
+
+
+@pytest.fixture
+def mock_data_manager(mock_connection_manager, mock_collection_manager):
+    """
+    Factory fixture to create DataManager instances with mocked dependencies.
+
+    Coverage: DataManager initialization tests with various configurations.
+    """
+    from milvus_ops.data_management_operations import (
+        DataManager,
+        DataOperationConfig,
+    )
+
+    def _create_data_manager(config: DataOperationConfig | None = None):
+        return DataManager(
+            connection_manager=mock_connection_manager,
+            collection_manager=mock_collection_manager,
+            config=config,
+        )
+
+    return _create_data_manager
+
+
+@pytest.fixture
+def mock_pymilvus_collection_insert():
+    """
+    Create a mock PyMilvus Collection.insert() return value.
+
+    Coverage: Insert operation mocking.
+    """
+    mock_result = MagicMock()
+    mock_result.primary_keys = [1, 2, 3]
+    return mock_result
+
+
+@pytest.fixture
+def mock_pymilvus_collection_upsert():
+    """
+    Create a mock PyMilvus Collection.upsert() return value.
+
+    Coverage: Upsert operation mocking.
+    """
+    mock_result = MagicMock()
+    mock_result.primary_keys = [1, 2, 3]
+    return mock_result
+
+
+@pytest.fixture
+def mock_pymilvus_collection_delete():
+    """
+    Create a mock PyMilvus Collection.delete() return value.
+
+    Coverage: Delete operation mocking.
+    """
+    mock_result = MagicMock()
+    mock_result.delete_count = 5
+    return mock_result
+
+
+@pytest.fixture
+def data_ops_config_variations():
+    """
+    Provide various DataOperationConfig setups for parameterized tests.
+
+    Coverage: DataOperationConfig with different parameter combinations.
+    """
+    from milvus_ops.data_management_operations import DataOperationConfig
+
+    return {
+        "default": DataOperationConfig(),
+        "custom_batch": DataOperationConfig(default_batch_size=500, max_batch_size=5000),
+        "no_timeout": DataOperationConfig(default_operation_timeout=None),
+        "no_retry": DataOperationConfig(retry_transient_errors=False),
+        "timing_disabled": DataOperationConfig(enable_timing=False),
+        "strict_validation": DataOperationConfig(strict_validation=True),
+        "relaxed_validation": DataOperationConfig(strict_validation=False),
+    }
+
+
+@pytest.fixture
+def sample_collection_description_for_data_ops(basic_collection_schema):
+    """
+    Create a sample CollectionDescription for data operations tests.
+
+    Coverage: CollectionDescription creation for data operation tests.
+    """
+    from milvus_ops.collection_operations.entities import (
+        CollectionDescription,
+        CollectionState,
+        LoadState,
+    )
+
+    return CollectionDescription(
+        name="test_collection",
+        collection_schema=basic_collection_schema,
+        id="test_collection_id",
+        created_at=datetime.now(timezone.utc),
+        schema_hash="abc123def456",
+        state=CollectionState.AVAILABLE,
+        load_state=LoadState.LOADED,
+        created_at_is_synthetic=False,
+    )
+
+
+@pytest.fixture
+def complex_documents_with_metadata():
+    """
+    Create complex documents with metadata for testing.
+
+    Coverage: Complex document structure tests.
+    """
+    from milvus_ops.data_management_operations.models.entities import Document
+
+    return [
+        Document(
+            id=1,
+            vector=[0.1] * 512,
+            text="Complex document one",
+            metadata={"category": "test", "priority": 1},
+        ),
+        Document(
+            id=2,
+            vector=[0.2] * 512,
+            text="Complex document two",
+            metadata={"category": "production", "priority": 2},
+        ),
+    ]
+
+
+# ============================================================================
 # Cleanup Utilities
 # ============================================================================
 
