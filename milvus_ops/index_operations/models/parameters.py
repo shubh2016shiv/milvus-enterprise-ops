@@ -7,10 +7,10 @@ These classes provide type-safe parameter validation and sensible defaults.
 
 Typical usage:
     from Milvus_Ops.index_operations import HNSWParams, IndexType
-    
+
     # Create index with type-specific parameters
     params = HNSWParams(M=16, efConstruction=200)
-    
+
     result = await index_manager.create_index(
         collection_name="documents",
         field_name="embedding",
@@ -20,8 +20,9 @@ Typical usage:
     )
 """
 
-from typing import Dict, Any, Union, ClassVar, Type
-from pydantic import BaseModel, Field, validator, model_validator
+from typing import Any, ClassVar
+
+from pydantic import BaseModel, Field, model_validator, validator
 
 from milvus_ops.collection_operations import IndexType
 
@@ -29,21 +30,22 @@ from milvus_ops.collection_operations import IndexType
 class IndexParams(BaseModel):
     """
     Base class for index parameters.
-    
+
     This class provides common functionality for all index parameter types,
     including validation and conversion to/from dictionaries.
-    
+
     Attributes:
         index_type: The type of index these parameters are for
     """
+
     index_type: ClassVar[IndexType]
-    
-    def to_dict(self) -> Dict[str, Any]:
+
+    def to_dict(self) -> dict[str, Any]:
         """Convert parameters to a dictionary for Milvus API."""
         return self.dict(exclude={"index_type"})
-    
+
     @classmethod
-    def from_dict(cls, params: Dict[str, Any]) -> 'IndexParams':
+    def from_dict(cls, params: dict[str, Any]) -> "IndexParams":
         """Create parameters from a dictionary."""
         return cls(**params)
 
@@ -51,17 +53,18 @@ class IndexParams(BaseModel):
 class IvfFlatParams(IndexParams):
     """
     Parameters for IVF_FLAT index.
-    
+
     IVF_FLAT is a basic clustering-based index that divides vectors into clusters
     and performs exact search within selected clusters.
-    
+
     Attributes:
         nlist: Number of clusters (higher values provide higher accuracy but slower performance)
     """
+
     index_type: ClassVar[IndexType] = IndexType.IVF_FLAT
     nlist: int = Field(1024, ge=1, description="Number of clusters")
-    
-    @validator('nlist')
+
+    @validator("nlist")
     def validate_nlist(cls, v):
         """Validate nlist is a reasonable value."""
         if v < 1:
@@ -74,17 +77,18 @@ class IvfFlatParams(IndexParams):
 class IvfSQ8Params(IndexParams):
     """
     Parameters for IVF_SQ8 index.
-    
+
     IVF_SQ8 is a quantization-based index that reduces memory usage by using
     scalar quantization to compress vectors.
-    
+
     Attributes:
         nlist: Number of clusters
     """
+
     index_type: ClassVar[IndexType] = IndexType.IVF_SQ8
     nlist: int = Field(1024, ge=1, description="Number of clusters")
-    
-    @validator('nlist')
+
+    @validator("nlist")
     def validate_nlist(cls, v):
         """Validate nlist is a reasonable value."""
         if v < 1:
@@ -97,21 +101,22 @@ class IvfSQ8Params(IndexParams):
 class IvfPQParams(IndexParams):
     """
     Parameters for IVF_PQ index.
-    
+
     IVF_PQ is a product quantization index that significantly reduces memory usage
     by compressing vectors using product quantization.
-    
+
     Attributes:
         nlist: Number of clusters
         m: Number of vector subdivisions (must be a divisor of the dimension)
         nbits: Number of bits for each sub-vector (typically 8)
     """
+
     index_type: ClassVar[IndexType] = IndexType.IVF_PQ
     nlist: int = Field(1024, ge=1, description="Number of clusters")
     m: int = Field(8, ge=1, description="Number of vector subdivisions")
     nbits: int = Field(8, ge=1, le=8, description="Number of bits for each sub-vector")
-    
-    @model_validator(mode='after')
+
+    @model_validator(mode="after")
     def validate_parameters(self):
         """Validate parameter combinations."""
         if self.nbits > 8:
@@ -122,19 +127,23 @@ class IvfPQParams(IndexParams):
 class HNSWParams(IndexParams):
     """
     Parameters for HNSW index.
-    
+
     HNSW (Hierarchical Navigable Small World) is a graph-based index that offers
     high performance for approximate nearest neighbor search.
-    
+
     Attributes:
-        M: Number of connections per layer (higher values provide higher accuracy but use more memory)
+        M: Number of connections per layer (higher values provide higher
+           accuracy but use more memory)
         efConstruction: Size of the dynamic candidate list during construction
     """
+
     index_type: ClassVar[IndexType] = IndexType.HNSW
     M: int = Field(16, ge=4, le=64, description="Number of connections per layer")
-    efConstruction: int = Field(200, ge=8, description="Size of dynamic candidate list during construction")
-    
-    @validator('M')
+    efConstruction: int = Field(
+        200, ge=8, description="Size of dynamic candidate list during construction"
+    )
+
+    @validator("M")
     def validate_m(cls, v):
         """Validate M is within reasonable bounds."""
         if v < 4:
@@ -142,8 +151,8 @@ class HNSWParams(IndexParams):
         if v > 64:
             raise ValueError("M is very large (>64), which may cause memory issues")
         return v
-    
-    @validator('efConstruction')
+
+    @validator("efConstruction")
     def validate_ef_construction(cls, v):
         """Validate efConstruction is within reasonable bounds."""
         if v < 8:
@@ -156,32 +165,30 @@ class HNSWParams(IndexParams):
 class ANNOYParams(IndexParams):
     """
     Parameters for ANNOY index.
-    
+
     ANNOY (Approximate Nearest Neighbors Oh Yeah) is a fast approximate nearest neighbor
     search algorithm optimized for static datasets.
-    
+
     Attributes:
         n_trees: Number of trees to build (more trees give higher accuracy but slower build time)
     """
+
     index_type: ClassVar[IndexType] = IndexType.ANNOY
     n_trees: int = Field(8, ge=1, description="Number of trees to build")
 
 
 # Factory function to create appropriate params from type
-def create_index_params(
-    index_type: Union[str, IndexType],
-    **kwargs
-) -> IndexParams:
+def create_index_params(index_type: str | IndexType, **kwargs) -> IndexParams:
     """
     Create index parameters based on index type.
-    
+
     Args:
         index_type: Type of index
         **kwargs: Parameters for the index
-        
+
     Returns:
         IndexParams instance of the appropriate type
-        
+
     Raises:
         ValueError: If index_type is not supported
     """
@@ -190,46 +197,46 @@ def create_index_params(
         try:
             index_type = IndexType(index_type.upper())
         except ValueError:
-            raise ValueError(f"Unsupported index type: {index_type}")
-    
+            raise ValueError(f"Unsupported index type: {index_type}") from None
+
     # Map index types to parameter classes
-    params_map: Dict[IndexType, Type[IndexParams]] = {
+    params_map: dict[IndexType, type[IndexParams]] = {
         IndexType.IVF_FLAT: IvfFlatParams,
         IndexType.IVF_SQ8: IvfSQ8Params,
         IndexType.IVF_PQ: IvfPQParams,
         IndexType.HNSW: HNSWParams,
-        IndexType.ANNOY: ANNOYParams
+        IndexType.ANNOY: ANNOYParams,
     }
-    
+
     # Get the appropriate class
     params_class = params_map.get(index_type)
     if not params_class:
         raise ValueError(f"No parameter class defined for index type: {index_type}")
-    
+
     # Create and return parameters
     return params_class(**kwargs)
 
 
 # Map of index types to their parameter classes for type checking
-INDEX_PARAMS_MAP: Dict[IndexType, Type[IndexParams]] = {
+INDEX_PARAMS_MAP: dict[IndexType, type[IndexParams]] = {
     IndexType.IVF_FLAT: IvfFlatParams,
     IndexType.IVF_SQ8: IvfSQ8Params,
     IndexType.IVF_PQ: IvfPQParams,
     IndexType.HNSW: HNSWParams,
-    IndexType.ANNOY: ANNOYParams
+    IndexType.ANNOY: ANNOYParams,
 }
 
 
-def get_default_params(index_type: Union[str, IndexType]) -> IndexParams:
+def get_default_params(index_type: str | IndexType) -> IndexParams:
     """
     Get default parameters for an index type.
-    
+
     Args:
         index_type: Type of index
-        
+
     Returns:
         IndexParams with default values
-        
+
     Raises:
         ValueError: If index_type is not supported
     """
