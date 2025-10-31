@@ -7,26 +7,24 @@ metrics, and observability features.
 """
 
 # Import semantic search components
-from .semantic import SemanticSearch
-
 # Import hybrid search components
 from .hybrid import (
-    HybridSearch,
+    BM25Config,
     BM25SparseVectorGenerator,
+    CircuitBreaker,
+    HybridSearch,
+    HybridSearchMetrics,
+    HybridSearchMode,
+    RetryConfig,
+    SearchStatus,
     fuse_results_rrf,
     fuse_results_weighted,
-    HybridSearchMetrics,
-    SearchStatus,
-    HybridSearchMode,
-    BM25Config,
-    RetryConfig,
-    CircuitBreaker,
 )
+from .semantic import SemanticSearch
 
 __all__ = [
     # Semantic search
     "SemanticSearch",
-    
     # Hybrid search
     "HybridSearch",
     "BM25SparseVectorGenerator",
@@ -39,5 +37,3 @@ __all__ = [
     "RetryConfig",
     "CircuitBreaker",
 ]
-
-

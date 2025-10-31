@@ -5,18 +5,18 @@ This module provides configuration classes for hybrid search operations,
 including BM25 parameters, retry configuration, and search mode enumerations.
 """
 
-from enum import Enum
 from dataclasses import dataclass, field
-from typing import Optional, Set, Tuple, Type
+from enum import Enum
 
 
 class HybridSearchMode(Enum):
     """
     Hybrid search combination modes.
-    
+
     Defines the different ways dense and sparse/keyword searches
     can be combined in hybrid search operations.
     """
+
     VECTOR_SPARSE = "vector_sparse"
     VECTOR_KEYWORD = "vector_keyword"
     VECTOR_ONLY = "vector_only"
@@ -27,10 +27,10 @@ class HybridSearchMode(Enum):
 class BM25Config:
     """
     Configuration for BM25 sparse vector generation.
-    
+
     BM25 is a probabilistic ranking function used to estimate the relevance
     of documents to a given search query. This configuration controls its behavior.
-    
+
     Attributes:
         k1: Term frequency saturation parameter (typical range: 1.2-2.0)
         b: Length normalization parameter (0 = no normalization, 1 = full normalization)
@@ -43,6 +43,7 @@ class BM25Config:
         custom_stopwords: Optional custom stopword set
         idf_smoothing: Whether to use smoothed IDF calculation
     """
+
     k1: float = 1.5
     b: float = 0.75
     delta: float = 1.0
@@ -51,9 +52,9 @@ class BM25Config:
     max_dimensions: int = 10000
     enable_stemming: bool = False
     enable_stopwords: bool = True
-    custom_stopwords: Optional[Set[str]] = None
+    custom_stopwords: set[str] | None = None
     idf_smoothing: bool = True
-    
+
     def __post_init__(self):
         """Validate BM25 configuration parameters."""
         if self.k1 <= 0:
@@ -77,10 +78,10 @@ class BM25Config:
 class RetryConfig:
     """
     Configuration for retry behavior with exponential backoff.
-    
+
     This configuration controls how failed operations are retried,
     including timing, jitter, and which exceptions should trigger retries.
-    
+
     Attributes:
         max_retries: Maximum number of retry attempts
         initial_delay: Initial delay in seconds before first retry
@@ -89,13 +90,14 @@ class RetryConfig:
         jitter: Whether to add random jitter to delays
         retriable_exceptions: Tuple of exception types that should trigger retries
     """
+
     max_retries: int = 3
     initial_delay: float = 0.5
     max_delay: float = 30.0
     exponential_base: float = 2.0
     jitter: bool = True
-    retriable_exceptions: Tuple[Type[Exception], ...] = field(default_factory=tuple)
-    
+    retriable_exceptions: tuple[type[Exception], ...] = field(default_factory=tuple)
+
     def __post_init__(self):
         """Validate retry configuration parameters."""
         if self.max_retries < 0:
@@ -104,21 +106,22 @@ class RetryConfig:
             raise ValueError(f"initial_delay must be positive, got {self.initial_delay}")
         if self.max_delay < self.initial_delay:
             raise ValueError(
-                f"max_delay ({self.max_delay}) must be >= "
-                f"initial_delay ({self.initial_delay})"
+                f"max_delay ({self.max_delay}) must be >= initial_delay ({self.initial_delay})"
             )
         if self.exponential_base <= 1:
             raise ValueError(f"exponential_base must be > 1, got {self.exponential_base}")
-        
+
         # Set default retriable exceptions if none provided
         if not self.retriable_exceptions:
             # Import here to avoid circular dependencies
+            from milvus_ops.milvus_ops_exceptions import (
+                ConnectionError as MilvusConnectionError,
+            )
+
             from ....core.search_ops_exceptions import SearchTimeoutError
-            from milvus_ops.milvus_ops_exceptions import ConnectionError as MilvusConnectionError
-            
+
             self.retriable_exceptions = (
                 SearchTimeoutError,
                 MilvusConnectionError,
                 TimeoutError,
             )
-

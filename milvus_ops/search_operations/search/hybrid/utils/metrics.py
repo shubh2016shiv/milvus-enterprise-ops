@@ -5,19 +5,19 @@ This module provides metrics tracking for hybrid search operations,
 including status enumerations and comprehensive metrics dataclasses.
 """
 
-import time
-from enum import Enum
 from dataclasses import dataclass, field
-from typing import Optional
+from enum import Enum
+import time
 
 
 class SearchStatus(Enum):
     """
     Enumeration of search operation states.
-    
+
     Used to track the final status of search operations for monitoring
     and observability purposes.
     """
+
     SUCCESS = "success"
     FAILURE = "failure"
     TIMEOUT = "timeout"
@@ -30,11 +30,11 @@ class SearchStatus(Enum):
 class HybridSearchMetrics:
     """
     Comprehensive metrics for hybrid search operations.
-    
+
     This dataclass tracks detailed timing information, result counts,
     retry attempts, and status for each search operation, enabling
     thorough monitoring and analysis.
-    
+
     Attributes:
         query_hash: Hash of the query for identification
         embedding_time_ms: Time taken to generate dense embedding
@@ -54,6 +54,7 @@ class HybridSearchMetrics:
         sparse_results: Number of results from sparse vector search
         keyword_results: Number of results from keyword search
     """
+
     query_hash: str
     embedding_time_ms: float = 0.0
     sparse_generation_time_ms: float = 0.0
@@ -63,7 +64,7 @@ class HybridSearchMetrics:
     results_count: int = 0
     retry_count: int = 0
     status: SearchStatus = SearchStatus.SUCCESS
-    error_message: Optional[str] = None
+    error_message: str | None = None
     cache_hit: bool = False
     collection_name: str = ""
     search_mode: str = "vector_only"
@@ -71,11 +72,11 @@ class HybridSearchMetrics:
     dense_results: int = 0
     sparse_results: int = 0
     keyword_results: int = 0
-    
+
     def to_dict(self):
         """
         Convert metrics to dictionary format.
-        
+
         Returns:
             Dictionary representation of metrics
         """
@@ -98,4 +99,3 @@ class HybridSearchMetrics:
             "sparse_results": self.sparse_results,
             "keyword_results": self.keyword_results,
         }
-

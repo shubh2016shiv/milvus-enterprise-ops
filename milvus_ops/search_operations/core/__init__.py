@@ -6,26 +6,24 @@ including base classes, exceptions, and the main search manager.
 """
 
 from .base import BaseSearch, SearchResult
-from .search_ops_exceptions import (
-    SearchError,
-    InvalidSearchParametersError,
-    EmbeddingGenerationError,
-    SearchTimeoutError,
-    ReRankingError,
-    HybridSearchError,
-    FusionError,
-    EmptyResultError
-)
 from .manager import SearchManager
+from .search_ops_exceptions import (
+    EmbeddingGenerationError,
+    EmptyResultError,
+    FusionError,
+    HybridSearchError,
+    InvalidSearchParametersError,
+    ReRankingError,
+    SearchError,
+    SearchTimeoutError,
+)
 
 __all__ = [
     # Base classes
     "BaseSearch",
     "SearchResult",
-    
     # Manager
     "SearchManager",
-    
     # Exceptions
     "SearchError",
     "InvalidSearchParametersError",
@@ -36,8 +34,3 @@ __all__ = [
     "FusionError",
     "EmptyResultError",
 ]
-
-
-
-
-

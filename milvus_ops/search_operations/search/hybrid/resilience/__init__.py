@@ -6,8 +6,8 @@ including circuit breakers, retry logic, and graceful degradation.
 """
 
 from .circuit_breaker import CircuitBreaker
-from .retry import execute_with_retry, calculate_backoff_delay
 from .fallback import handle_fallback
+from .retry import calculate_backoff_delay, execute_with_retry
 
 __all__ = [
     "CircuitBreaker",
@@ -15,4 +15,3 @@ __all__ = [
     "calculate_backoff_delay",
     "handle_fallback",
 ]
-
