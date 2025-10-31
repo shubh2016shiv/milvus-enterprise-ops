@@ -13,12 +13,7 @@ class PartitionError(Exception):
     Provides clear context about what went wrong and where.
     """
 
-    def __init__(
-        self,
-        message: str,
-        collection_name: str = None,
-        partition_name: str = None
-    ):
+    def __init__(self, message: str, collection_name: str = None, partition_name: str = None):
         self.collection_name = collection_name
         self.partition_name = partition_name
 
@@ -29,10 +24,7 @@ class PartitionError(Exception):
         if partition_name:
             context_parts.append(f"partition '{partition_name}'")
 
-        if context_parts:
-            full_message = f"{' in '.join(context_parts)}: {message}"
-        else:
-            full_message = message
+        full_message = f"{' in '.join(context_parts)}: {message}" if context_parts else message
 
         super().__init__(full_message)
 
@@ -46,9 +38,7 @@ class PartitionNotFoundError(PartitionError):
     """
 
     def __init__(self, partition_name: str, collection_name: str):
-        message = (
-            f"Partition not found. Check the name or create the partition first."
-        )
+        message = "Partition not found. Check the name or create the partition first."
         super().__init__(message, collection_name, partition_name)
 
 
@@ -94,7 +84,7 @@ class PartitionOperationError(PartitionError):
         operation: str,
         collection_name: str,
         partition_name: str = None,
-        reason: str = None
+        reason: str = None,
     ):
         message = f"Failed to {operation}"
         if reason:

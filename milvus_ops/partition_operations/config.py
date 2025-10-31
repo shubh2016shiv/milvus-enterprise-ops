@@ -5,9 +5,8 @@ Provides essential configuration settings with sensible defaults
 and environment variable support.
 """
 
-import os
 import logging
-from typing import Optional
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -26,23 +25,15 @@ class PartitionConfig:
         self.default_operation_timeout = float(
             os.getenv("MILVUS_PARTITION_DEFAULT_TIMEOUT", "30.0")
         )
-        self.create_partition_timeout = float(
-            os.getenv("MILVUS_PARTITION_CREATE_TIMEOUT", "60.0")
-        )
-        self.drop_partition_timeout = float(
-            os.getenv("MILVUS_PARTITION_DROP_TIMEOUT", "30.0")
-        )
-        self.load_partition_timeout = float(
-            os.getenv("MILVUS_PARTITION_LOAD_TIMEOUT", "120.0")
-        )
+        self.create_partition_timeout = float(os.getenv("MILVUS_PARTITION_CREATE_TIMEOUT", "60.0"))
+        self.drop_partition_timeout = float(os.getenv("MILVUS_PARTITION_DROP_TIMEOUT", "30.0"))
+        self.load_partition_timeout = float(os.getenv("MILVUS_PARTITION_LOAD_TIMEOUT", "120.0"))
 
         # Validation settings
         self.validate_partition_names = (
             os.getenv("MILVUS_PARTITION_VALIDATE_NAMES", "true").lower() == "true"
         )
-        self.max_partition_name_length = int(
-            os.getenv("MILVUS_PARTITION_MAX_NAME_LENGTH", "255")
-        )
+        self.max_partition_name_length = int(os.getenv("MILVUS_PARTITION_MAX_NAME_LENGTH", "255"))
 
         # Safety settings
         self.prevent_default_partition_deletion = (
@@ -69,7 +60,7 @@ class PartitionConfig:
 
 
 # Global configuration instance
-_config: Optional[PartitionConfig] = None
+_config: PartitionConfig | None = None
 
 
 def get_partition_config() -> PartitionConfig:

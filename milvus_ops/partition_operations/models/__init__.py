@@ -7,16 +7,16 @@ throughout the project.
 """
 
 from .entities import (
-    PartitionDescription,
-    PartitionStats,
     LoadProgress,
+    PartitionDescription,
     PartitionLoadState,
     PartitionState,
+    PartitionStats,
 )
 
 __all__ = [
     "PartitionDescription",
-    "PartitionStats", 
+    "PartitionStats",
     "LoadProgress",
     "PartitionLoadState",
     "PartitionState",

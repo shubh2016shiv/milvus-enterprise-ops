@@ -6,26 +6,28 @@ with simplicity, robustness, and scalability.
 """
 
 import asyncio
+from datetime import datetime
 import logging
 import time
-from typing import Dict, List, Optional, Union
-from datetime import datetime
 
 from milvus_ops.connection_management import ConnectionManager
-from milvus_ops.milvus_ops_exceptions import CollectionNotFoundError, OperationTimeoutError
-
-from ..models.entities import (
-    PartitionDescription, PartitionStats, LoadProgress,
-    PartitionLoadState, PartitionState
+from milvus_ops.milvus_ops_exceptions import (
+    CollectionNotFoundError,
+    OperationTimeoutError,
 )
-from .validator import PartitionValidator
+
 from ..config import get_partition_config
 
 # Import custom exceptions to avoid circular imports
-from ..exceptions import (
-    InvalidPartitionNameError,
-    PartitionNotFoundError
+from ..exceptions import InvalidPartitionNameError, PartitionNotFoundError
+from ..models.entities import (
+    LoadProgress,
+    PartitionDescription,
+    PartitionLoadState,
+    PartitionState,
+    PartitionStats,
 )
+from .validator import PartitionValidator
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +55,7 @@ class PartitionManager:
         - Connection manager for all Milvus SDK interactions
         """
         self._connection_manager = connection_manager
-        self._locks: Dict[str, asyncio.Lock] = {}
+        self._locks: dict[str, asyncio.Lock] = {}
         self._global_lock = asyncio.Lock()
         self._config = get_partition_config()
 
@@ -80,10 +82,7 @@ class PartitionManager:
             return self._locks[partition_key]
 
     async def create_partition(
-        self,
-        collection_name: str,
-        partition_name: str,
-        timeout: Optional[float] = None
+        self, collection_name: str, partition_name: str, timeout: float | None = None
     ) -> PartitionDescription:
         """
         Create a new partition in the specified collection.
@@ -116,7 +115,7 @@ class PartitionManager:
         if self._config.validate_partition_names:
             is_valid, errors = await PartitionValidator.validate_partition_name(partition_name)
             if not is_valid:
-                raise InvalidPartitionNameError(partition_name, ', '.join(errors))
+                raise InvalidPartitionNameError(partition_name, ", ".join(errors))
 
         # Get partition lock for thread safety
         partition_lock = await self._get_partition_lock(collection_name, partition_name)
@@ -128,27 +127,37 @@ class PartitionManager:
                 raise CollectionNotFoundError(f"Collection '{collection_name}' does not exist")
 
             # Check if partition already exists
-            partition_exists = await self.partition_exists(collection_name, partition_name, timeout=timeout)
+            partition_exists = await self.partition_exists(
+                collection_name, partition_name, timeout=timeout
+            )
             if partition_exists:
-                logger.info(f"Partition '{partition_name}' already exists in collection '{collection_name}'")
-                return await self.get_partition_info(collection_name, partition_name, timeout=timeout)
+                logger.info(
+                    f"Partition '{partition_name}' already exists in collection '{collection_name}'"
+                )
+                return await self.get_partition_info(
+                    collection_name, partition_name, timeout=timeout
+                )
 
             # Create partition
             await self._connection_manager.execute_operation_async(
-                lambda alias: self._create_partition_internal(alias, collection_name, partition_name),
-                timeout=timeout or self._config.create_partition_timeout
+                lambda alias: self._create_partition_internal(
+                    alias, collection_name, partition_name
+                ),
+                timeout=timeout or self._config.create_partition_timeout,
             )
 
             # Get the created partition description
-            description = await self.get_partition_info(collection_name, partition_name, timeout=timeout)
-            logger.info(f"Successfully created partition '{partition_name}' in collection '{collection_name}'")
+            description = await self.get_partition_info(
+                collection_name, partition_name, timeout=timeout
+            )
+            logger.info(
+                f"Successfully created partition '{partition_name}' "
+                f"in collection '{collection_name}'"
+            )
             return description
 
     async def create_partition_if_not_exists(
-        self,
-        collection_name: str,
-        partition_name: str,
-        timeout: Optional[float] = None
+        self, collection_name: str, partition_name: str, timeout: float | None = None
     ) -> PartitionDescription:
         """
         Create a partition if it doesn't already exist (idempotent operation).
@@ -175,24 +184,26 @@ class PartitionManager:
         try:
             exists = await self.partition_exists(collection_name, partition_name, timeout=timeout)
             if exists:
-                return await self.get_partition_info(collection_name, partition_name, timeout=timeout)
+                return await self.get_partition_info(
+                    collection_name, partition_name, timeout=timeout
+                )
             else:
                 return await self.create_partition(collection_name, partition_name, timeout=timeout)
         except Exception as e:
             logger.error(f"Failed to create partition '{partition_name}' if not exists: {e}")
             raise
 
-    def _create_partition_internal(self, alias: str, collection_name: str, partition_name: str) -> None:
+    def _create_partition_internal(
+        self, alias: str, collection_name: str, partition_name: str
+    ) -> None:
         """Internal helper to create a partition via PyMilvus SDK."""
         from pymilvus import Collection
+
         collection = Collection(name=collection_name, using=alias)
         collection.create_partition(partition_name)
 
     async def partition_exists(
-        self,
-        collection_name: str,
-        partition_name: str,
-        timeout: Optional[float] = None
+        self, collection_name: str, partition_name: str, timeout: float | None = None
     ) -> bool:
         """
         Checks if a partition exists in the specified collection.
@@ -212,26 +223,30 @@ class PartitionManager:
 
             result = await self._connection_manager.execute_operation_async(
                 lambda alias: self._has_partition_internal(alias, collection_name, partition_name),
-                timeout=timeout or self._config.default_operation_timeout
+                timeout=timeout or self._config.default_operation_timeout,
             )
             return await self._ensure_awaited(result)
         except Exception as e:
             logger.error(f"Error checking if partition '{partition_name}' exists: {e}")
             return False
 
-    def _has_partition_internal(self, alias: str, collection_name: str, partition_name: str) -> bool:
+    def _has_partition_internal(
+        self, alias: str, collection_name: str, partition_name: str
+    ) -> bool:
         """Internal helper to check partition existence."""
         from pymilvus import Collection
+
         collection = Collection(name=collection_name, using=alias)
         return collection.has_partition(partition_name)
 
-    async def _collection_exists(self, collection_name: str, timeout: Optional[float] = None) -> bool:
+    async def _collection_exists(self, collection_name: str, timeout: float | None = None) -> bool:
         """Helper method to check if a collection exists."""
         try:
             from pymilvus import utility
+
             result = await self._connection_manager.execute_operation_async(
                 lambda alias: utility.has_collection(collection_name, using=alias),
-                timeout=timeout or self._config.default_operation_timeout
+                timeout=timeout or self._config.default_operation_timeout,
             )
             return await self._ensure_awaited(result)
         except Exception as e:
@@ -239,10 +254,8 @@ class PartitionManager:
             return False
 
     async def list_partitions(
-        self,
-        collection_name: str,
-        timeout: Optional[float] = None
-    ) -> List[str]:
+        self, collection_name: str, timeout: float | None = None
+    ) -> list[str]:
         """
         Retrieve a list of all partition names from the specified collection.
 
@@ -273,25 +286,23 @@ class PartitionManager:
 
             result = await self._connection_manager.execute_operation_async(
                 lambda alias: self._list_partitions_internal(alias, collection_name),
-                timeout=timeout or self._config.default_operation_timeout
+                timeout=timeout or self._config.default_operation_timeout,
             )
             return await self._ensure_awaited(result)
         except Exception as e:
             logger.error(f"Error listing partitions: {e}")
             return []
 
-    def _list_partitions_internal(self, alias: str, collection_name: str) -> List[str]:
+    def _list_partitions_internal(self, alias: str, collection_name: str) -> list[str]:
         """Internal helper to list all partitions."""
         from pymilvus import Collection
+
         collection = Collection(name=collection_name, using=alias)
         partitions = collection.partitions
         return [partition.name for partition in partitions]
 
     async def get_partition_info(
-        self,
-        collection_name: str,
-        partition_name: str,
-        timeout: Optional[float] = None
+        self, collection_name: str, partition_name: str, timeout: float | None = None
     ) -> PartitionDescription:
         """
         Retrieves detailed information about a specific partition.
@@ -313,13 +324,17 @@ class PartitionManager:
             if not collection_exists:
                 raise CollectionNotFoundError(f"Collection '{collection_name}' does not exist")
 
-            partition_exists = await self.partition_exists(collection_name, partition_name, timeout=timeout)
+            partition_exists = await self.partition_exists(
+                collection_name, partition_name, timeout=timeout
+            )
             if not partition_exists:
                 raise PartitionNotFoundError(partition_name, collection_name)
 
             result = await self._connection_manager.execute_operation_async(
-                lambda alias: self._describe_partition_internal(alias, collection_name, partition_name),
-                timeout=timeout or self._config.default_operation_timeout
+                lambda alias: self._describe_partition_internal(
+                    alias, collection_name, partition_name
+                ),
+                timeout=timeout or self._config.default_operation_timeout,
             )
             return await self._ensure_awaited(result)
         except Exception as e:
@@ -327,13 +342,11 @@ class PartitionManager:
             raise
 
     def _describe_partition_internal(
-        self,
-        alias: str,
-        collection_name: str,
-        partition_name: str
+        self, alias: str, collection_name: str, partition_name: str
     ) -> PartitionDescription:
         """Internal helper to describe a partition."""
         from pymilvus import Collection, Partition
+
         collection = Collection(name=collection_name, using=alias)
         partition = Partition(collection, partition_name)
 
@@ -345,14 +358,11 @@ class PartitionManager:
             created_at=datetime.now(),  # Milvus doesn't provide creation time
             state=PartitionState.AVAILABLE,
             load_state=PartitionLoadState.UNLOADED,
-            created_at_is_synthetic=True
+            created_at_is_synthetic=True,
         )
 
     async def delete_partition(
-        self,
-        collection_name: str,
-        partition_name: str,
-        timeout: Optional[float] = None
+        self, collection_name: str, partition_name: str, timeout: float | None = None
     ) -> bool:
         """
         Deletes a partition permanently from the specified collection.
@@ -380,13 +390,15 @@ class PartitionManager:
             if not collection_exists:
                 raise CollectionNotFoundError(f"Collection '{collection_name}' does not exist")
 
-            partition_exists = await self.partition_exists(collection_name, partition_name, timeout=timeout)
+            partition_exists = await self.partition_exists(
+                collection_name, partition_name, timeout=timeout
+            )
             if not partition_exists:
                 raise PartitionNotFoundError(partition_name, collection_name)
 
             await self._connection_manager.execute_operation_async(
                 lambda alias: self._drop_partition_internal(alias, collection_name, partition_name),
-                timeout=timeout or self._config.drop_partition_timeout
+                timeout=timeout or self._config.drop_partition_timeout,
             )
 
             # Remove the partition lock
@@ -395,12 +407,18 @@ class PartitionManager:
                 if partition_key in self._locks:
                     del self._locks[partition_key]
 
-            logger.info(f"Successfully deleted partition '{partition_name}' from collection '{collection_name}'")
+            logger.info(
+                f"Successfully deleted partition '{partition_name}' "
+                f"from collection '{collection_name}'"
+            )
             return True
 
-    def _drop_partition_internal(self, alias: str, collection_name: str, partition_name: str) -> None:
+    def _drop_partition_internal(
+        self, alias: str, collection_name: str, partition_name: str
+    ) -> None:
         """Internal helper to drop a partition."""
         from pymilvus import Collection
+
         collection = Collection(name=collection_name, using=alias)
         collection.drop_partition(partition_name)
 
@@ -409,8 +427,8 @@ class PartitionManager:
         collection_name: str,
         partition_name: str,
         wait: bool = False,
-        timeout: Optional[float] = None
-    ) -> Union[bool, LoadProgress]:
+        timeout: float | None = None,
+    ) -> bool | LoadProgress:
         """
         Load a partition into Milvus's memory for querying.
 
@@ -451,13 +469,15 @@ class PartitionManager:
             if not collection_exists:
                 raise CollectionNotFoundError(f"Collection '{collection_name}' does not exist")
 
-            partition_exists = await self.partition_exists(collection_name, partition_name, timeout=timeout)
+            partition_exists = await self.partition_exists(
+                collection_name, partition_name, timeout=timeout
+            )
             if not partition_exists:
                 raise PartitionNotFoundError(partition_name, collection_name)
 
             await self._connection_manager.execute_operation_async(
                 lambda alias: self._load_partition_internal(alias, collection_name, partition_name),
-                timeout=timeout or self._config.load_partition_timeout
+                timeout=timeout or self._config.load_partition_timeout,
             )
 
             if not wait:
@@ -469,7 +489,9 @@ class PartitionManager:
             max_poll_interval = 5.0
 
             while True:
-                progress = await self.get_load_progress(collection_name, partition_name, timeout=timeout)
+                progress = await self.get_load_progress(
+                    collection_name, partition_name, timeout=timeout
+                )
 
                 if progress.is_complete:
                     logger.info(f"Partition '{partition_name}' loaded successfully")
@@ -485,17 +507,17 @@ class PartitionManager:
                 await asyncio.sleep(poll_interval)
                 poll_interval = min(poll_interval * 1.5, max_poll_interval)
 
-    def _load_partition_internal(self, alias: str, collection_name: str, partition_name: str) -> None:
+    def _load_partition_internal(
+        self, alias: str, collection_name: str, partition_name: str
+    ) -> None:
         """Internal helper to load a partition."""
         from pymilvus import Collection
+
         collection = Collection(name=collection_name, using=alias)
         collection.load([partition_name])
 
     async def get_load_progress(
-        self,
-        collection_name: str,
-        partition_name: str,
-        timeout: Optional[float] = None
+        self, collection_name: str, partition_name: str, timeout: float | None = None
     ) -> LoadProgress:
         """
         Retrieves the current loading progress of a partition.
@@ -516,13 +538,17 @@ class PartitionManager:
             if not collection_exists:
                 raise CollectionNotFoundError(f"Collection '{collection_name}' does not exist")
 
-            partition_exists = await self.partition_exists(collection_name, partition_name, timeout=timeout)
+            partition_exists = await self.partition_exists(
+                collection_name, partition_name, timeout=timeout
+            )
             if not partition_exists:
                 raise PartitionNotFoundError(partition_name, collection_name)
 
             result = await self._connection_manager.execute_operation_async(
-                lambda alias: self._get_load_progress_internal(alias, collection_name, partition_name),
-                timeout=timeout or self._config.default_operation_timeout
+                lambda alias: self._get_load_progress_internal(
+                    alias, collection_name, partition_name
+                ),
+                timeout=timeout or self._config.default_operation_timeout,
             )
             return await self._ensure_awaited(result)
         except Exception as e:
@@ -530,34 +556,32 @@ class PartitionManager:
             raise
 
     def _get_load_progress_internal(
-        self,
-        alias: str,
-        collection_name: str,
-        partition_name: str
+        self, alias: str, collection_name: str, partition_name: str
     ) -> LoadProgress:
         """Internal helper to estimate load progress."""
         from pymilvus import utility
+
         try:
             # Get collection load state as proxy for partition state
             load_state = utility.load_state(collection_name, partition_name, using=alias)
 
-            if load_state.name == 'Loaded':
+            if load_state.name == "Loaded":
                 return LoadProgress(
                     partition_name=partition_name,
                     collection_name=collection_name,
                     state=PartitionLoadState.LOADED,
                     progress=1.0,
                     loaded_segments=1,
-                    total_segments=1
+                    total_segments=1,
                 )
-            elif load_state.name == 'Loading':
+            elif load_state.name == "Loading":
                 return LoadProgress(
                     partition_name=partition_name,
                     collection_name=collection_name,
                     state=PartitionLoadState.LOADING,
                     progress=0.5,
                     loaded_segments=0,
-                    total_segments=1
+                    total_segments=1,
                 )
         except Exception as e:
             logger.debug(f"Could not get load state: {e}")
@@ -569,14 +593,11 @@ class PartitionManager:
             state=PartitionLoadState.UNLOADED,
             progress=0.0,
             loaded_segments=0,
-            total_segments=1
+            total_segments=1,
         )
 
     async def release_partition(
-        self,
-        collection_name: str,
-        partition_name: str,
-        timeout: Optional[float] = None
+        self, collection_name: str, partition_name: str, timeout: float | None = None
     ) -> bool:
         """
         Releases a partition from Milvus's memory.
@@ -596,28 +617,32 @@ class PartitionManager:
             if not collection_exists:
                 raise CollectionNotFoundError(f"Collection '{collection_name}' does not exist")
 
-            partition_exists = await self.partition_exists(collection_name, partition_name, timeout=timeout)
+            partition_exists = await self.partition_exists(
+                collection_name, partition_name, timeout=timeout
+            )
             if not partition_exists:
                 raise PartitionNotFoundError(partition_name, collection_name)
 
             await self._connection_manager.execute_operation_async(
-                lambda alias: self._release_partition_internal(alias, collection_name, partition_name),
-                timeout=timeout or self._config.default_operation_timeout
+                lambda alias: self._release_partition_internal(
+                    alias, collection_name, partition_name
+                ),
+                timeout=timeout or self._config.default_operation_timeout,
             )
             logger.info(f"Successfully released partition '{partition_name}' from memory")
             return True
 
-    def _release_partition_internal(self, alias: str, collection_name: str, partition_name: str) -> None:
+    def _release_partition_internal(
+        self, alias: str, collection_name: str, partition_name: str
+    ) -> None:
         """Internal helper to release a partition."""
         from pymilvus import Collection
+
         collection = Collection(name=collection_name, using=alias)
         collection.release([partition_name])
 
     async def get_partition_stats(
-        self,
-        collection_name: str,
-        partition_name: str,
-        timeout: Optional[float] = None
+        self, collection_name: str, partition_name: str, timeout: float | None = None
     ) -> PartitionStats:
         """
         Retrieves detailed statistics for a partition.
@@ -632,8 +657,10 @@ class PartitionManager:
         """
         try:
             result = await self._connection_manager.execute_operation_async(
-                lambda alias: self._get_partition_stats_internal(alias, collection_name, partition_name),
-                timeout=timeout or self._config.default_operation_timeout
+                lambda alias: self._get_partition_stats_internal(
+                    alias, collection_name, partition_name
+                ),
+                timeout=timeout or self._config.default_operation_timeout,
             )
             return await self._ensure_awaited(result)
         except Exception as e:
@@ -641,13 +668,11 @@ class PartitionManager:
             raise
 
     def _get_partition_stats_internal(
-        self,
-        alias: str,
-        collection_name: str,
-        partition_name: str
+        self, alias: str, collection_name: str, partition_name: str
     ) -> PartitionStats:
         """Internal helper to get partition statistics."""
         from pymilvus import Collection, Partition
+
         collection = Collection(name=collection_name, using=alias)
         partition = Partition(collection, partition_name)
 
@@ -661,9 +686,9 @@ class PartitionManager:
             created_at=datetime.now(),
             row_count=row_count,
             memory_size=0,  # Not available via SDK
-            disk_size=0,    # Not available via SDK
-            index_size=0,   # Not available via SDK
-            num_segments=0  # Not available via SDK
+            disk_size=0,  # Not available via SDK
+            index_size=0,  # Not available via SDK
+            num_segments=0,  # Not available via SDK
         )
 
     async def _ensure_awaited(self, result):
@@ -676,10 +701,10 @@ class PartitionManager:
     async def create_multiple_partitions(
         self,
         collection_name: str,
-        partition_names: List[str],
-        timeout: Optional[float] = None,
-        continue_on_error: bool = True
-    ) -> List[PartitionDescription]:
+        partition_names: list[str],
+        timeout: float | None = None,
+        continue_on_error: bool = True,
+    ) -> list[PartitionDescription]:
         """
         Creates multiple partitions in a collection.
 
@@ -716,10 +741,10 @@ class PartitionManager:
     async def delete_multiple_partitions(
         self,
         collection_name: str,
-        partition_names: List[str],
-        timeout: Optional[float] = None,
-        continue_on_error: bool = True
-    ) -> List[str]:
+        partition_names: list[str],
+        timeout: float | None = None,
+        continue_on_error: bool = True,
+    ) -> list[str]:
         """
         Deletes multiple partitions from a collection.
 

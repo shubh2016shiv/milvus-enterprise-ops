@@ -54,23 +54,27 @@ This module integrates seamlessly with other Milvus enterprise ops modules:
 """
 
 # Core components
+# Configuration
+from .config import PartitionConfig, get_partition_config, set_partition_config
 from .core.manager import PartitionManager
 from .core.validator import PartitionValidator
 
-# Models and entities
-from .models.entities import (
-    PartitionDescription,
-    PartitionStats, 
-    LoadProgress,
-    PartitionLoadState,
-    PartitionState
+# Exceptions
+from .exceptions import (
+    InvalidPartitionNameError,
+    PartitionAlreadyExistsError,
+    PartitionError,
+    PartitionNotFoundError,
+    PartitionOperationError,
 )
 
-# Configuration
-from .config import (
-    get_partition_config,
-    set_partition_config,
-    PartitionConfig
+# Models and entities
+from .models.entities import (
+    LoadProgress,
+    PartitionDescription,
+    PartitionLoadState,
+    PartitionState,
+    PartitionStats,
 )
 
 # Utilities
@@ -78,16 +82,7 @@ from .utils import (
     PartitionProgressTracker,
     PartitionTimer,
     get_global_progress_tracker,
-    get_global_timer
-)
-
-# Exceptions
-from .exceptions import (
-    PartitionError,
-    PartitionNotFoundError,
-    PartitionAlreadyExistsError,
-    PartitionOperationError,
-    InvalidPartitionNameError
+    get_global_timer,
 )
 
 __version__ = "1.0.0"
@@ -98,61 +93,51 @@ __all__ = [
     # Core components
     "PartitionManager",
     "PartitionValidator",
-    
     # Models and entities
     "PartitionDescription",
     "PartitionStats",
-    "LoadProgress", 
+    "LoadProgress",
     "PartitionLoadState",
     "PartitionState",
-    
     # Configuration
     "get_partition_config",
     "set_partition_config",
     "PartitionConfig",
-    
     # Utilities
     "PartitionProgressTracker",
     "PartitionTimer",
     "get_global_progress_tracker",
     "get_global_timer",
-    
     # Exceptions
     "PartitionError",
     "PartitionNotFoundError",
     "PartitionAlreadyExistsError",
     "PartitionOperationError",
     "InvalidPartitionNameError",
-
     # Factory functions
-    "get_partition_operations"
+    "get_partition_operations",
 ]
 
 # Module metadata
-__all__.extend([
-    "__version__",
-    "__author__"
-])
+__all__.extend(["__version__", "__author__"])
+
 
 # Quick start function for convenience
 async def quick_create_partition(
-    collection_name: str,
-    partition_name: str,
-    connection_manager = None,
-    **kwargs
+    collection_name: str, partition_name: str, connection_manager=None, **kwargs
 ) -> PartitionDescription:
     """
     Quick function to create a partition with minimal setup.
-    
+
     Args:
         collection_name: Name of the collection
         partition_name: Name of the partition to create
         connection_manager: Optional connection manager (creates one if not provided)
         **kwargs: Additional parameters passed to create_partition
-        
+
     Returns:
         PartitionDescription object
-        
+
     Example:
         partition = await quick_create_partition(
             collection_name="my_collection",
@@ -160,19 +145,17 @@ async def quick_create_partition(
         )
     """
     from connection_management import ConnectionManager
-    
+
     if connection_manager is None:
         connection_manager = ConnectionManager()
         should_close = True
     else:
         should_close = False
-    
+
     try:
         manager = PartitionManager(connection_manager)
         return await manager.create_partition(
-            collection_name=collection_name,
-            partition_name=partition_name,
-            **kwargs
+            collection_name=collection_name, partition_name=partition_name, **kwargs
         )
     finally:
         if should_close:
@@ -196,6 +179,7 @@ def get_partition_operations(connection_manager=None):
     """
     if connection_manager is None:
         from connection_management import ConnectionManager
+
         connection_manager = ConnectionManager()
 
     return PartitionManager(connection_manager)

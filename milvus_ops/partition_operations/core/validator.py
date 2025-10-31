@@ -7,7 +7,6 @@ all requirements before attempting operations.
 
 import logging
 import re
-from typing import List, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -27,10 +26,10 @@ class PartitionValidator:
     RESERVED_NAMES = frozenset({"_default", "default"})
 
     # Pattern for valid partition names (alphanumeric, underscores, hyphens)
-    VALID_NAME_PATTERN = re.compile(r'^[a-zA-Z0-9_-]+$')
+    VALID_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9_-]+$")
 
     @classmethod
-    async def validate_partition_name(cls, partition_name: str) -> Tuple[bool, List[str]]:
+    async def validate_partition_name(cls, partition_name: str) -> tuple[bool, list[str]]:
         """
         Validates a partition name according to Milvus constraints.
 
@@ -65,18 +64,16 @@ class PartitionValidator:
 
         # Check pattern (alphanumeric, underscores, hyphens only)
         if not cls.VALID_NAME_PATTERN.match(name):
-            errors.append(
-                "Name can only contain letters, numbers, underscores, and hyphens"
-            )
+            errors.append("Name can only contain letters, numbers, underscores, and hyphens")
 
         # Check for leading/trailing special characters (best practice)
-        if name and name[0] in ('_', '-'):
+        if name and name[0] in ("_", "-"):
             errors.append("Name should not start with underscore or hyphen")
-        if name and name[-1] in ('_', '-'):
+        if name and name[-1] in ("_", "-"):
             errors.append("Name should not end with underscore or hyphen")
 
         # Check for consecutive underscores (can cause issues)
-        if '__' in name:
+        if "__" in name:
             errors.append("Name cannot contain consecutive underscores")
 
         # Check if original had whitespace
@@ -106,20 +103,20 @@ class PartitionValidator:
         name = name.strip()
 
         # Replace spaces with underscores
-        name = name.replace(' ', '_')
+        name = name.replace(" ", "_")
 
         # Remove invalid characters
-        name = ''.join(c for c in name if c.isalnum() or c in ('_', '-'))
+        name = "".join(c for c in name if c.isalnum() or c in ("_", "-"))
 
         # Remove leading/trailing special characters
-        name = name.strip('_-')
+        name = name.strip("_-")
 
         # Replace consecutive underscores
-        while '__' in name:
-            name = name.replace('__', '_')
+        while "__" in name:
+            name = name.replace("__", "_")
 
         # Truncate to max length
         if len(name) > cls.MAX_NAME_LENGTH:
-            name = name[:cls.MAX_NAME_LENGTH].rstrip('_-')
+            name = name[: cls.MAX_NAME_LENGTH].rstrip("_-")
 
         return name
