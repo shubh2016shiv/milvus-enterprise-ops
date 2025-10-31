@@ -9,7 +9,7 @@ from collections.abc import Callable
 import time
 from typing import Any
 
-from connection_management import ConnectionManager
+from milvus_ops.connection_management import ConnectionManager
 
 from ...config.semantic import SemanticSearchConfig
 from ...core.base import BaseSearch, SearchResult

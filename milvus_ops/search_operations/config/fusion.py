@@ -5,6 +5,7 @@ This module defines configuration for fusion search operations.
 """
 
 from dataclasses import dataclass, field
+import math
 
 from .base import BaseSearchConfig, FusionMethod
 from .hybrid import HybridSearchConfig
@@ -40,6 +41,9 @@ class FusionSearchConfig(BaseSearchConfig):
                     f"Number of weights ({len(self.weights)}) must match "
                     f"number of search configs ({len(self.search_configs)})"
                 )
+
+            if any(math.isnan(w) for w in self.weights):
+                raise ValueError("Weights cannot contain NaN values")
 
             if abs(sum(self.weights) - 1.0) > 0.001:  # Allow small floating point error
                 raise ValueError(f"Weights must sum to 1.0, got {sum(self.weights)}")

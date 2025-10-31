@@ -5,6 +5,7 @@ This module defines configuration for hybrid search operations.
 """
 
 from dataclasses import dataclass
+import math
 
 from .base import BaseSearchConfig
 
@@ -35,9 +36,14 @@ class HybridSearchConfig(BaseSearchConfig):
         # Note: sparse_field and keyword_field are now truly optional
         # Vector-only mode is supported when neither is specified
 
-        # Validate weights are non-negative
-        if self.vector_weight < 0 or self.sparse_weight < 0:
-            raise ValueError("Weights must be non-negative")
+        # Validate weights are non-negative and not NaN
+        if (
+            self.vector_weight < 0
+            or self.sparse_weight < 0
+            or math.isnan(self.vector_weight)
+            or math.isnan(self.sparse_weight)
+        ):
+            raise ValueError("Weights must be non-negative and not NaN")
 
         # Ensure at least one weight is positive
         if self.vector_weight <= 0 and self.sparse_weight <= 0:

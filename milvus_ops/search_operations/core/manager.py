@@ -8,9 +8,11 @@ allowing for easy switching between different search types and configurations.
 import logging
 from typing import Any
 
+from pydantic import ValidationError
+
 from milvus_ops.connection_management import ConnectionManager
 
-from ..config.base import ReRankingMethod, SearchType
+from ..config.base import MetricType, ReRankingMethod, SearchType
 from ..config.hybrid import HybridSearchConfig
 from ..config.reranking import ReRankingConfig
 from ..config.semantic import SemanticSearchConfig
@@ -55,7 +57,6 @@ class SearchManager:
         self._semantic_search = SemanticSearch(
             connection_manager=connection_manager,
             embedding_provider=embedding_provider,
-            enable_caching=enable_caching,
         )
 
         self._hybrid_search = HybridSearch(
@@ -148,6 +149,11 @@ class SearchManager:
             else:
                 raise InvalidSearchParametersError(f"Unsupported search type: {search_type}")
 
+        except ValidationError as e:
+            # Convert Pydantic ValidationError to InvalidSearchParametersError
+            error_msg = f"Invalid search parameters: {str(e)}"
+            logger.error(error_msg)
+            raise InvalidSearchParametersError(error_msg) from e
         except Exception as e:
             if isinstance(e, InvalidSearchParametersError | SearchError):
                 raise
@@ -166,10 +172,15 @@ class SearchManager:
         Returns:
             SemanticSearchConfig instance
         """
+        # Convert string to enum if necessary
+        metric_type = params.metric_type
+        if isinstance(metric_type, str):
+            metric_type = MetricType(metric_type)
+
         return SemanticSearchConfig(
             top_k=params.top_k,
             timeout=params.timeout,
-            metric_type=params.metric_type,
+            metric_type=metric_type,
             search_field=params.vector_field,
             expr=params.expr,
             params=params.params,
@@ -186,10 +197,15 @@ class SearchManager:
         Returns:
             HybridSearchConfig instance
         """
+        # Convert string to enum if necessary
+        metric_type = params.metric_type
+        if isinstance(metric_type, str):
+            metric_type = MetricType(metric_type)
+
         return HybridSearchConfig(
             top_k=params.top_k,
             timeout=params.timeout,
-            metric_type=params.metric_type,
+            metric_type=metric_type,
             vector_field=params.vector_field,
             sparse_field=params.sparse_field,
             keyword_field=params.keyword_field,
@@ -209,17 +225,20 @@ class SearchManager:
         Returns:
             ReRankingConfig instance
         """
+        # Convert string to enum if necessary
+        rerank_method = params.rerank_method
+        if isinstance(rerank_method, str):
+            rerank_method = ReRankingMethod(rerank_method)
+
         rerank_params = {}
 
         # Add method-specific parameters
-        if params.rerank_method == ReRankingMethod.WEIGHTED:
+        if rerank_method == ReRankingMethod.WEIGHTED:
             rerank_params["weights"] = params.rerank_weights or [0.5, 0.5]
-        elif params.rerank_method == ReRankingMethod.RRF:
+        elif rerank_method == ReRankingMethod.RRF:
             rerank_params["k"] = params.rerank_k
 
-        return ReRankingConfig(
-            enabled=params.rerank, method=params.rerank_method, params=rerank_params
-        )
+        return ReRankingConfig(enabled=params.rerank, method=rerank_method, params=rerank_params)
 
     async def _perform_semantic_search_with_reranking(
         self,

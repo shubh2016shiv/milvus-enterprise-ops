@@ -26,6 +26,15 @@ class EmbeddingResult:
     is_batch: bool = False
     metadata: dict[str, Any] = field(default_factory=dict)
 
+    def __post_init__(self):
+        """Validate embedding result after initialization."""
+        if self.embedding is None:
+            raise ValueError("Embedding cannot be None")
+        if self.dimension <= 0:
+            raise ValueError("Dimension must be positive")
+        if self.processing_time_ms < 0:
+            raise ValueError("Processing time cannot be negative")
+
 
 class EmbeddingProvider(ABC):
     """

@@ -13,7 +13,7 @@ import logging
 import time
 from typing import Any
 
-from connection_management import ConnectionManager
+from milvus_ops.connection_management import ConnectionManager
 
 from ....config.hybrid import HybridSearchConfig
 from ....core.base import BaseSearch, SearchResult

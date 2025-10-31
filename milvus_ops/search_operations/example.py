@@ -8,7 +8,7 @@ for different search types and configurations.
 import asyncio
 import logging
 
-from connection_management import MilvusConnector
+from milvus_ops.connection_management import MilvusConnector
 from milvus_ops.search_operations import (
     EmbeddingProvider,
     EmbeddingResult,

@@ -6,6 +6,7 @@ This module defines base configuration classes and enums for search operations.
 
 from dataclasses import dataclass, field
 from enum import Enum
+import math
 from typing import Any
 
 
@@ -62,8 +63,14 @@ class BaseSearchConfig:
         """Validate configuration after initialization"""
         if self.top_k <= 0:
             raise ValueError("top_k must be positive")
-        if self.timeout <= 0:
-            raise ValueError("timeout must be positive")
+        if self.timeout <= 0 or math.isnan(self.timeout):
+            raise ValueError("timeout must be positive and not NaN")
+
+        # Validate metric_type is a valid enum value
+        if not isinstance(self.metric_type, MetricType):
+            raise ValueError(
+                f"metric_type must be a valid MetricType enum value, got {self.metric_type}"
+            )
 
         # Initialize default params if not provided
         if not self.params:
